@@ -1,0 +1,7 @@
+build/
+re/ghidra/
+re/*.exe
+# raw Ghidra decompiler dumps of the game's code: kept locally, not published
+re/*.txt
+__pycache__/
+*.log

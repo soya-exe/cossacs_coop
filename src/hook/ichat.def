@@ -1,0 +1,17 @@
+; ichat.dll: the game's 12 IChat exports, same MSVC-mangled names and ordinals 1..12 as the
+; original, implemented in ichat.c (all __cdecl). GNU ld keeps the mangled names unchanged
+; (tools/build.sh checks the export table).
+LIBRARY ichat.dll
+EXPORTS
+    ?ChatProcess@@YAXXZ = btw_ChatProcess @1
+    ?GetGameID@@YAXPAD@Z = btw_GetGameID @2
+    ?GoHomeAnyway@@YAXXZ = btw_GoHomeAnyway @3
+    ?LeaveGSCRoom@@YAXXZ = btw_LeaveGSCRoom @4
+    ?Process_GSC_ChatWindow@@YAH_NPAURoomInfo@@@Z = btw_Process_GSC_ChatWindow @5
+    ?ReportAliveState@@YAXHPAH@Z = btw_ReportAliveState @6
+    ?ReportGSCGame@@YAXHHPAUOnePlayerReport@@@Z = btw_ReportGSCGame @7
+    ?SendPrivateMessage@@YAXPAD0@Z = btw_SendPrivateMessage @8
+    ?SendVictoryState@@YAXHE@Z = btw_SendVictoryState @9
+    ?SetChatWState@@YAXHH@Z = btw_SetChatWState @10
+    ?SetGameID@@YAXPAD@Z = btw_SetGameID @11
+    ?StartGSCGame@@YAXPAD0HPAHPAPAD11@Z = btw_StartGSCGame @12
