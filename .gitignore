@@ -5,3 +5,4 @@ re/*.exe
 re/*.txt
 __pycache__/
 *.log
+dist/

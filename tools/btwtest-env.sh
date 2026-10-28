@@ -41,7 +41,12 @@ btw_wine_env() {
     # mscoree/mshtml: no Mono/Gecko install prompts; winemenubuilder: no .desktop files or
     # file associations written into the user's ~/.local/share/applications.
     local ov="mscoree,mshtml=;winemenubuilder.exe=d"
-    [ "$BTW_AUDIO" = off ] && ov="$ov;winepulse.drv,winealsa.drv,wineoss.drv=d"
+    if [ "$BTW_AUDIO" = off ]; then
+        ov="$ov;winepulse.drv,winealsa.drv,wineoss.drv=d"
+        # second line of defence: even a driver that still loads finds no sound server
+        export PULSE_SERVER=unix:/nonexistent PIPEWIRE_REMOTE=/nonexistent SDL_AUDIODRIVER=dummy
+        unset PULSE_COOKIE
+    fi
     [ -n "${BTW_DLLOVERRIDES:-}" ] && ov="$ov;$BTW_DLLOVERRIDES"
     export WINEDLLOVERRIDES="$ov"
     export BTWSTEAM_MOCK_ID="$MOCK_ID"

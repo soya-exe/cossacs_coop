@@ -15,6 +15,9 @@ static CRITICAL_SECTION g_log_cs;
 static HANDLE g_log = INVALID_HANDLE_VALUE;
 static char g_dir[MAX_PATH];
 
+/* Marker for installer/setup.c and installer/install.sh (they search the DLL's bytes). */
+__attribute__((used)) const char btw_version_tag[] = "btwsteam-version:" BTWSTEAM_VERSION;
+
 const char *btw_exe_dir(void)
 {
     return g_dir;
@@ -46,7 +49,7 @@ void btw_log_init(void)
 
     SYSTEMTIME t;
     GetLocalTime(&t);
-    btw_log("btwsteam " BTW_VERSION_STR " (ichat.dll proxy) started %04u-%02u-%02u, pid %lu, dir %s",
+    btw_log("btwsteam " BTWSTEAM_VERSION " (ichat.dll proxy) started %04u-%02u-%02u, pid %lu, dir %s",
             t.wYear, t.wMonth, t.wDay, (unsigned long)GetCurrentProcessId(), g_dir);
 }
 

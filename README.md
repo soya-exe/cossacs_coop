@@ -6,7 +6,8 @@ IP addresses. The game's own lockstep netcode is unchanged; the mod replaces its
 lobby with a Steam lobby and carries its UDP packets over Steam.
 
 Status: works between two game copies on one PC (mock Steam, also with lag and loss); not yet
-tested on real Steam between two accounts. Installer in progress.
+tested on real Steam between two accounts. Players: see [docs/PLAYERS.md](docs/PLAYERS.md)
+(install, how to play, uninstall).
 
 ## How it works
 
@@ -31,6 +32,9 @@ Needs `mingw-w64-gcc` (i686).
 tools/build.sh        # build/ichat.dll
 tools/build_mock.sh   # build/mock/steam_api.dll (tests only) + test_mock.exe
 tools/test_mock.sh    # mock Steam self-test under wine
+tools/build_installer.sh  # build/btwsteam-setup.exe (Windows installer, DLLs embedded)
+tools/package.sh      # dist/cossacks-steam-coop-<version>/ and .zip (installers + DLLs + PLAYERS.md)
+tools/test_installers.sh  # installer tests: install.sh and setup.exe (wine) on a fake Steam tree
 ```
 
 No game files are in this repository.
