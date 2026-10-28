@@ -49,6 +49,9 @@ if [ ! -f "$ROOT/install.sha256" ]; then
     echo "recorded install hashes in $ROOT/install.sha256"
 fi
 
+# The game's own bin/ichat.dll (GSC), the only acceptable "pristine" one.
+ICHAT_GSC_SHA256=8a0d5edcb6a207d25c14c3c2af5e8fbabbc2d08f9ed8f751e7bc9b242e14986a
+
 src_player=$(tr -d '\r\n ' < "$GAME_DIR/bin/players.txt" 2>/dev/null || true)
 
 for n in "${names[@]}"; do
@@ -73,8 +76,19 @@ for n in "${names[@]}"; do
     # Directories the game creates/writes; make sure they exist as real dirs.
     mkdir -p "$dst/bin/Autorecord" "$dst/bin/Screenshots" "$dst/bin/Save"
     chmod -R u+w "$dst/bin"
+    # The real install may have the mod installed (ichat_orig.dll = the game's file): make the
+    # copy pristine and drop the mod's files and logs.
+    if [ -f "$dst/bin/ichat_orig.dll" ]; then
+        mv -f "$dst/bin/ichat_orig.dll" "$dst/bin/ichat.dll"
+        rm -f "$dst/bin/steam_api.dll" "$dst/bin/steam_appid.txt" "$dst/bin/btwsteam-installed.txt" \
+              "$dst/bin/btwsteam.log" "$dst/bin/btwsteam.prev.log"
+        [ -f "$dst/bin/steam_api_orig.dll" ] && mv -f "$dst/bin/steam_api_orig.dll" "$dst/bin/steam_api.dll"
+        echo "[$n] real install has the mod: copy restored to the game's own ichat.dll"
+    fi
+    [ "$(sha256sum < "$dst/bin/ichat.dll" | cut -d' ' -f1)" = "$ICHAT_GSC_SHA256" ] ||
+        { echo "[$n] bin/ichat.dll is not the game's original (sha256 mismatch), refusing" >&2; exit 1; }
     # Pristine copy of the original ichat.dll, used by test_install.sh --restore.
-    cp -p "$GAME_DIR/bin/ichat.dll" "$dst/state/ichat.dll.orig"
+    cp -p "$dst/bin/ichat.dll" "$dst/state/ichat.dll.orig"
 
     # Per-instance player name so the two copies are distinguishable in the lobby.
     pname="TEST$(echo "$n" | tr a-z A-Z)"

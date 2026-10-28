@@ -11,7 +11,7 @@ mkdir -p build
 CFLAGS="-std=c11 -mcrtdll=msvcrt-os -O2 -Wall -Wextra -Werror=implicit-function-declaration \
   -D__USE_MINGW_ANSI_STDIO=1 -D_WIN32_WINNT=0x0501 -DWIN32_LEAN_AND_MEAN \
   -fno-strict-aliasing -fno-asynchronous-unwind-tables"
-LDFLAGS="-shared -mcrtdll=msvcrt-os -static-libgcc -Wl,--enable-auto-image-base -Wl,--nxcompat -s"
+LDFLAGS="-shared -mcrtdll=msvcrt-os -static-libgcc -Wl,--enable-auto-image-base -Wl,--nxcompat -Wl,--no-insert-timestamp -s"
 
 $CC $CFLAGS -o build/ichat.dll src/hook/*.c src/hook/ichat.def $LDFLAGS -lws2_32 -luser32 -ladvapi32
 

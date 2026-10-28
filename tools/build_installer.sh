@@ -25,7 +25,7 @@ $CC -std=c11 -mcrtdll=msvcrt-os -municode -O2 -Wall -Wextra -Werror=implicit-fun
     -D__USE_MINGW_ANSI_STDIO=1 -D_WIN32_WINNT=0x0601 -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE \
     "-DBTWSTEAM_VERSION=\"$VERSION\"" -fno-asynchronous-unwind-tables \
     -o build/btwsteam-setup.exe installer/setup.c build/installer/setup.res.o \
-    -mconsole -static-libgcc -Wl,--nxcompat -Wl,--dynamicbase -s -ladvapi32
+    -mconsole -static-libgcc -Wl,--nxcompat -Wl,--dynamicbase -Wl,--no-insert-timestamp -s -ladvapi32
 
 bad=$($OBJDUMP -p build/btwsteam-setup.exe | sed -n 's/.*DLL Name: //p' | grep -viE '^(kernel32|advapi32|msvcrt)\.dll$' || true)
 if [ -n "$bad" ]; then echo "build_installer.sh: unexpected imports: $bad" >&2; exit 1; fi
