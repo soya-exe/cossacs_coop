@@ -26,6 +26,12 @@ DMCR_SHA256=3923b0ff3ae8da0584f29ae2bbf2e2deb030e57df11d37fb6fb55fa5ceb4acd6
 ICHAT_GSC_SHA256=8a0d5edcb6a207d25c14c3c2af5e8fbabbc2d08f9ed8f751e7bc9b242e14986a
 RECORD=btwsteam-installed.txt
 HERE=$(cd "$(dirname "$0")" && pwd)
+# Payload: next to this script (release zip); in a source checkout (installer/install.sh)
+# fall back to the built ../build/ichat.dll and ../third_party/steam_api.dll.
+SRC_ICHAT=$HERE/ichat.dll SRC_STEAM=$HERE/steam_api.dll
+if [ ! -f "$SRC_ICHAT" ] && [ -f "$HERE/../build/ichat.dll" ] && [ -f "$HERE/../third_party/steam_api.dll" ]; then
+    SRC_ICHAT=$(cd "$HERE/.." && pwd)/build/ichat.dll SRC_STEAM=$(cd "$HERE/.." && pwd)/third_party/steam_api.dll
+fi
 
 lang=${BTWSTEAM_LANG:-${LC_ALL:-${LC_MESSAGES:-${LANG:-en}}}}
 case $lang in ru*) RU=1 ;; *) RU=0 ;; esac
@@ -231,11 +237,11 @@ cmd_install() {
     fi
     refuse_if_running
 
-    local src_ichat=${BTWSTEAM_ICHAT:-$HERE/ichat.dll} src_steam=${BTWSTEAM_STEAM_API:-$HERE/steam_api.dll}
+    local src_ichat=${BTWSTEAM_ICHAT:-$SRC_ICHAT} src_steam=${BTWSTEAM_STEAM_API:-$SRC_STEAM}
     local pv; pv=$(btw_ver "$src_ichat")
     if [ ! -f "$src_ichat" ] || [ -z "$pv" ]; then
-        say "Error: %s is missing or is not a btwsteam build (it must sit next to install.sh)." \
-            "Ошибка: %s отсутствует или не из btwsteam (он должен лежать рядом с install.sh)." "$src_ichat"; exit 1
+        say "Error: %s is missing or is not a btwsteam build. Run install.sh from the unpacked release zip (or, in a source checkout, build first: tools/build.sh)." \
+            "Ошибка: %s отсутствует или не из btwsteam. Запускайте install.sh из распакованного архива релиза (или в исходниках сначала соберите: tools/build.sh)." "$src_ichat"; exit 1
     fi
     if [ ! -f "$src_steam" ] || ! grep -aq 'SteamAPI_' "$src_steam"; then
         say "Error: %s is missing or is not a steam_api.dll." "Ошибка: %s отсутствует или не является steam_api.dll." "$src_steam"; exit 1
@@ -351,7 +357,7 @@ cmd_uninstall() {
     elif [ -f "$STEAM" ]; then
         local cur ours=0; cur=$(sha "$STEAM")
         [ "$cur" = "$(rec steam_api.dll)" ] && ours=1
-        [ -f "${BTWSTEAM_STEAM_API:-$HERE/steam_api.dll}" ] && [ "$cur" = "$(sha "${BTWSTEAM_STEAM_API:-$HERE/steam_api.dll}")" ] && ours=1
+        [ -f "${BTWSTEAM_STEAM_API:-$SRC_STEAM}" ] && [ "$cur" = "$(sha "${BTWSTEAM_STEAM_API:-$SRC_STEAM}")" ] && ours=1
         if [ $ours = 1 ]; then
             rm -f "$STEAM"; changed=1; say "Removed steam_api.dll." "steam_api.dll удалён."
         else
