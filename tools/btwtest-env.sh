@@ -46,6 +46,13 @@ btw_wine_env() {
         # second line of defence: even a driver that still loads finds no sound server
         export PULSE_SERVER=unix:/nonexistent PIPEWIRE_REMOTE=/nonexistent SDL_AUDIODRIVER=dummy
         unset PULSE_COOKIE
+        # Wine 11 loads winealsa.so despite the override above and opened hw:N,M (HDMI) directly.
+        # An ALSA config that defines only null devices: "hw:..." names no longer resolve.
+        # Also: the prefix's HKCU\Software\Wine\Drivers Audio="" (run_instance.sh) and the
+        # /dev/snd guard in run_instance.sh.
+        local alsa="$BTW_TEST_ROOT/alsa-null.conf"
+        [ -f "$alsa" ] || printf 'pcm.!default { type null }\npcm.null { type null }\n' > "$alsa"
+        export ALSA_CONFIG_PATH="$alsa"
     fi
     [ -n "${BTW_DLLOVERRIDES:-}" ] && ov="$ov;$BTW_DLLOVERRIDES"
     export WINEDLLOVERRIDES="$ov"

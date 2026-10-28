@@ -74,6 +74,12 @@ if [ ! -f "$PFX/.btwtest-init" ]; then
     [ -f "$PFX/system.reg" ] || _btw_die "wineboot failed, see $STATE/prefix-init.log"
     date > "$PFX/.btwtest-init"
 fi
+# Audio off: Wine's documented switch, no audio driver at all (also for prefixes made before).
+if [ "$BTW_AUDIO" = off ] && ! grep -q '^"Audio"=""' "$PFX/user.reg" 2>/dev/null; then
+    ( btw_wine_env; "$BTW_WINE" reg add 'HKCU\Software\Wine\Drivers' /v Audio /t REG_SZ /d "" /f \
+          >> "$STATE/prefix-init.log" 2>&1; "$BTW_WINESERVER" -w )
+    grep -q '^"Audio"=""' "$PFX/user.reg" || _btw_die "could not disable audio in $PFX"
+fi
 
 if [ "$BTW_LAUNCH" = btwlaunch ]; then
     lexe="$BTW_TEST_ROOT/tools/btwlaunch.exe"
@@ -126,11 +132,26 @@ if [ "$BTW_SHOT_EVERY" != 0 ]; then
     shot_pid=$!
 fi
 
+# Audio guard: any wine process of this prefix holding a sound device stops the instance.
+audio_leak() {
+    local p
+    for p in $(pgrep -u "$(id -u)" -f 'wine|\.exe' 2>/dev/null); do
+        { tr '\0' '\n' < "/proc/$p/environ"; } 2>/dev/null | grep -qx "WINEPREFIX=$PFX" || continue
+        ls -l "/proc/$p/fd" 2>/dev/null | grep -q '/dev/snd/' && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
 start=$SECONDS
 while kill -0 "$gs_pid" 2>/dev/null; do
     if [ $((SECONDS - start)) -ge "$BTW_TIMEOUT" ]; then
         echo "[$INST] timeout after ${BTW_TIMEOUT}s, stopping"
         exit 124
+    fi
+    if [ "$BTW_AUDIO" = off ] && lp=$(audio_leak); then
+        echo "[$INST] AUDIO GUARD: pid $lp opened a sound device, stopping the instance" | tee -a "$D/run.log"
+        "$TOOLS/stop_instance.sh" "$INST" >/dev/null 2>&1
+        exit 3
     fi
     sleep 1
 done
