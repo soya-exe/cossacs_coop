@@ -40,7 +40,7 @@
 
 /* Release version. Also embedded as the string "btwsteam-version:<version>" (log.c), which
  * the installers (installer/) look for to tell our ichat.dll from the game's. */
-#define BTWSTEAM_VERSION  "0.1.3"
+#define BTWSTEAM_VERSION  "0.1.4"
 
 /* ---- virtual LAN constants (DESIGN.md "Virtual addressing") ---- */
 #define BTW_GAME_PORT     34000          /* sockets bound to this port are hooked */

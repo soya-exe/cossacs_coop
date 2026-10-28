@@ -104,24 +104,24 @@ when you are ready to play the network game»). Щелчок по крестик
 
 ## Производительность
 
-С версии 0.1.3 мод сам, только в памяти (файлы игры не меняются), делает две вещи:
+С версии 0.1.3 мод сам, только в памяти (файлы игры не меняются), делает одну вещь, а вторую
+можно включить:
 
-- **Под Proton/Wine:** `csemu.dll` выводит кадры без ожидания вертикальной синхронизации. Под
-  Wine это ожидание крутило поток вывода вхолостую и съедало до целого ядра процессора. Темп игры
-  не меняется: его задаёт ограничитель самой `csemu.dll` (60 кадров/с). В меню игра теперь
-  занимает в 1,5–3 раза меньше процессора, в бою — на 10–20 % меньше. В Windows эта правка не
-  включается.
 - **Везде:** в своих циклах ожидания (такт сетевой игры, конец кадра в одиночной игре) игра
   засыпает примерно на 1 мс вместо пустого вращения. Это заметно при медленной скорости игры (до
   целого ядра процессора) и в сетевой игре с пингом от 50 мс. Скорость игры и синхронизация по
   сети не меняются: условие выхода из цикла остаётся игровым, а засыпание делается, только если
   оно точно кончится раньше срока. В Windows засыпание по времени не включается (там слишком
-  грубые часы).
+  грубые часы). Отключение: `BTWSTEAM_NOSPIN=0 %command%`.
+- **Только по желанию, под Proton/Wine:** `BTWSTEAM_NOVSYNC=1 %command%` — `csemu.dll` выводит
+  кадры без ожидания вертикальной синхронизации. Под Wine это ожидание крутит поток вывода
+  вхолостую (до целого ядра процессора); с этой правкой меню занимает в 1,5–3 раза меньше
+  процессора. В 0.1.3 она была включена всегда, но у игрока с NVIDIA и gamescope картинка
+  замирала в главном меню, поэтому с 0.1.4 она выключена. Если после включения картинка
+  замрёт — уберите эту переменную.
 
-Если заметите разрывы картинки (tearing) или что-то другое странное, эти правки отключаются в
-Steam → свойства игры → параметры запуска: `BTWSTEAM_NOVSYNC=0 %command%` (вывод с ожиданием
-синхронизации, как раньше) и/или `BTWSTEAM_NOSPIN=0 %command%` (циклы ожидания как раньше), например
-`BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0 %command%`. В Windows — переменные среды с теми же именами.
+Параметры задаются в Steam → свойства игры → параметры запуска, например
+`BTWSTEAM_NOSPIN=0 %command%`. В Windows — переменные среды с теми же именами.
 
 ## После «Проверить целостность файлов игры»
 
@@ -266,24 +266,24 @@ when you are ready to play the network game»). Клацання по хрест
 
 ## Продуктивність
 
-З версії 0.1.3 мод сам, лише в пам'яті (файли гри не змінюються), робить дві речі:
+З версії 0.1.3 мод сам, лише в пам'яті (файли гри не змінюються), робить одну річ, а другу
+можна ввімкнути:
 
-- **Під Proton/Wine:** `csemu.dll` виводить кадри без очікування вертикальної синхронізації. Під
-  Wine це очікування крутило потік виводу вхолосту і з'їдало до цілого ядра процесора. Темп гри не
-  змінюється: його задає обмежувач самої `csemu.dll` (60 кадрів/с). У меню гра тепер займає
-  в 1,5–3 рази менше процесора, у бою — на 10–20 % менше. У Windows ця правка не вмикається.
 - **Скрізь:** у своїх циклах очікування (такт мережевої гри, кінець кадру в одиночній грі) гра
   засинає приблизно на 1 мс замість порожнього обертання. Це помітно при повільній швидкості гри
   (до цілого ядра процесора) і в мережевій грі з пінгом від 50 мс. Швидкість гри і синхронізація
   по мережі не змінюються: умова виходу з циклу лишається ігровою, а засинання робиться, лише якщо
   воно точно скінчиться раніше строку. У Windows засинання за часом не вмикається (там надто
-  грубий годинник).
+  грубий годинник). Вимкнення: `BTWSTEAM_NOSPIN=0 %command%`.
+- **Лише за бажанням, під Proton/Wine:** `BTWSTEAM_NOVSYNC=1 %command%` — `csemu.dll` виводить
+  кадри без очікування вертикальної синхронізації. Під Wine це очікування крутить потік виводу
+  вхолосту (до цілого ядра процесора); з цією правкою меню займає в 1,5–3 рази менше процесора.
+  У 0.1.3 вона була ввімкнена завжди, але в гравця з NVIDIA і gamescope картинка завмирала в
+  головному меню, тому з 0.1.4 вона вимкнена. Якщо після ввімкнення картинка завмре — приберіть
+  цю змінну.
 
-Якщо помітите розриви картинки (tearing) чи щось інше дивне, ці правки вимикаються в Steam →
-властивості гри → параметри запуску: `BTWSTEAM_NOVSYNC=0 %command%` (вивід з очікуванням
-синхронізації, як раніше) та/або `BTWSTEAM_NOSPIN=0 %command%` (цикли очікування як раніше),
-наприклад `BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0 %command%`. У Windows — змінні середовища з тими
-самими назвами.
+Параметри задаються в Steam → властивості гри → параметри запуску, наприклад
+`BTWSTEAM_NOSPIN=0 %command%`. У Windows — змінні середовища з тими самими назвами.
 
 ## Після «Перевірити цілісність файлів гри»
 
@@ -425,23 +425,24 @@ follows the same rules:
 
 ## Performance
 
-Since 0.1.3 the mod does two things by itself, in memory only (no game file is changed):
+Since 0.1.3 the mod does one thing by itself, in memory only (no game file is changed), and a
+second one can be turned on:
 
-- **Under Proton/Wine:** `csemu.dll` presents frames without waiting for vsync. Under Wine that
-  wait made its render thread spin and burn up to a whole CPU core. The game's pace does not
-  change: `csemu.dll`'s own limiter sets it (60 frames/s). Menus now use 1.5-3 times less CPU than
-  before, battles 10-20 % less. This change is never made on Windows.
 - **Everywhere:** in its wait loops (the multiplayer tick, the end of a single-player frame) the
   game sleeps for about 1 ms instead of spinning. This matters at a slow game speed (up to a whole
   CPU core) and in network games with a ping of 50 ms or more. Game speed and network sync do not
   change: the loop's exit condition stays the game's own, and a sleep is only taken if it surely
   ends before the deadline. On Windows the timed sleeps stay off (the clock there is too coarse).
+  To turn it off: `BTWSTEAM_NOSPIN=0 %command%`.
+- **Only if you ask for it, under Proton/Wine:** `BTWSTEAM_NOVSYNC=1 %command%` makes
+  `csemu.dll` present frames without waiting for vsync. Under Wine that wait makes its render
+  thread spin (up to a whole CPU core); with this change menus use 1.5-3 times less CPU. It was
+  always on in 0.1.3, but it froze the picture at the main menu for a player with NVIDIA and
+  gamescope, so it is off since 0.1.4. If the picture freezes after you turn it on, remove the
+  variable again.
 
-If you see tearing or anything else odd, turn them off in Steam -> game Properties -> Launch
-options: `BTWSTEAM_NOVSYNC=0 %command%` (vsync'd presents, as before) and/or
-`BTWSTEAM_NOSPIN=0 %command%` (wait loops as before), e.g.
-`BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0 %command%`. On Windows, set environment variables with the
-same names.
+Set these in Steam -> game Properties -> Launch options, e.g. `BTWSTEAM_NOSPIN=0 %command%`. On
+Windows, set environment variables with the same names.
 
 ## After "Verify integrity of game files"
 

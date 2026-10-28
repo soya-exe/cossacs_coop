@@ -19,7 +19,10 @@
 #      BTW_WINEDEBUG (-all; e.g. "err+all,+ddraw"), BTW_WINE (/usr/bin/wine), BTW_EXE (dmcr.exe),
 #      BTW_DLLOVERRIDES (extra WINEDLLOVERRIDES), BTWSTEAM_MOCK_ID (override the id),
 #      BTW_LAUNCH (btwlaunch = start through tools/btwlaunch.exe, the stand-in for the Steam-DRM'd
-#      csbtw.exe launcher that csemu.dll insists on; direct = run $BTW_EXE as is).
+#      csbtw.exe launcher that csemu.dll insists on; direct = run $BTW_EXE as is),
+#      BTW_GAMESCOPE_ARGS (replaces the default "-W <w> -H <h> -w <w> -h <h> -r 60" after
+#      `--backend headless`, e.g. "-w 1024 -h 768 -W 1920 -H 1080 -F fsr -f" as in a player's
+#      Steam launch options; a screenshot is then the game window or the -W x -H output).
 set -uo pipefail
 TOOLS=$(cd "$(dirname "$0")" && pwd)
 . "$TOOLS/btwtest-env.sh"
@@ -53,7 +56,7 @@ if [ "${1:-}" = "--inner" ]; then
 fi
 
 # ---- outer mode -----------------------------------------------------------------------------
-[ $# -ge 1 ] || { sed -n '2,25p' "$0"; exit 2; }
+[ $# -ge 1 ] || { sed -n '2,28p' "$0"; exit 2; }
 btw_inst "$1"; shift
 [ -f "$BIN/$BTW_EXE" ] || _btw_die "$BIN/$BTW_EXE missing; run tools/mkcopies.sh $INST"
 command -v gamescope >/dev/null || _btw_die "gamescope not installed (needed for the headless display)"
@@ -90,13 +93,18 @@ if [ "$BTW_LAUNCH" = btwlaunch ]; then
 fi
 
 W=${BTW_RES%x*}; H=${BTW_RES#*x}
+if [ -n "${BTW_GAMESCOPE_ARGS:-}" ]; then
+    read -r -a gs_args <<< "$BTW_GAMESCOPE_ARGS"
+else
+    gs_args=(-W "$W" -H "$H" -w "$W" -h "$H" -r 60)
+fi
 : > "$D/run.log"
 rm -f "$D"/shots/[0-9][0-9][0-9][0-9].png   # periodic shots of the previous run
 # Remove the env so a stale file is never read; inner mode rewrites it.
 rm -f "$STATE/env"
-echo "[$INST] starting headless gamescope ${W}x${H}, mock id $MOCK_ID, timeout ${BTW_TIMEOUT}s"
+echo "[$INST] starting headless gamescope ${gs_args[*]}, mock id $MOCK_ID, timeout ${BTW_TIMEOUT}s"
 env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY \
-    setsid gamescope --backend headless -W "$W" -H "$H" -w "$W" -h "$H" -r 60 \
+    setsid gamescope --backend headless "${gs_args[@]}" \
         -- "$TOOLS/run_instance.sh" --inner "$INST" "$@" \
     >> "$D/run.log" 2> "$STATE/gamescope.log" &
 gs_pid=$!

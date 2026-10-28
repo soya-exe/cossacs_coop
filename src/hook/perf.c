@@ -1,15 +1,20 @@
 /*
- * Two optional in-memory performance patches (tools/PERF-RESULTS.md, "Implemented (0.1.3)").
+ * Two optional in-memory performance patches (tools/PERF-RESULTS.md, sections 8 and 9).
  * Both are applied from DllMain, after every byte they depend on has been checked. On any
  * mismatch they log it and leave the code alone. No file on disk is ever written.
  *
- * 1. "novsync" (Wine/Proton only; BTWSTEAM_NOVSYNC=0 turns it off). csemu.dll's render
- *    thread presents with Flip(NULL, DDFLIP_WAIT). Under wined3d the vsync'd flip makes the
- *    next Lock of the back buffer spin-wait (3-93 % of a core). One byte in memory,
+ * 1. "novsync" (Wine/Proton only; OPT-IN since 0.1.4, BTWSTEAM_NOVSYNC=1 turns it on).
+ *    csemu.dll's render thread presents with Flip(NULL, DDFLIP_WAIT). Under wined3d the vsync'd
+ *    flip makes the next Lock of the back buffer spin-wait (3-93 % of a core). One byte in memory,
  *    csemu+0x3188: 0x01 -> 0x09 (DDFLIP_WAIT | DDFLIP_NOVSYNC). Frame pacing is not affected:
  *    csemu's own limiter on the game thread paces the frames. csemu.dll is a static import of
  *    dmcr.exe, so it is mapped before our DllMain runs, and its render thread starts much
  *    later (IDirectDraw::CreatePalette), so nothing executes the byte while we change it.
+ *    It was on by default in 0.1.3 and froze the picture at the main menu for a player on
+ *    Proton Experimental (Wine 11.0) + nested gamescope on Hyprland + NVIDIA GLX; with
+ *    BTWSTEAM_NOVSYNC=0 the same setup worked. The headless test harness (system Wine and
+ *    Proton in the Steam Linux Runtime, gamescope --backend headless) never froze, so the
+ *    unthrottled present path of a real display cannot be tested here: opt-in only.
  *
  * 2. "nospin" (BTWSTEAM_NOSPIN=0 turns it off). Two busy-wait loops in the in-game frame
  *    function 0x4b1530 call ProcessMessages (0x4717a0) and the game clock (0x5250e0) until a
@@ -50,6 +55,13 @@ static int env_off(const char *name)
 {
     char v[16];
     return strcmp(btw_env(name, v, sizeof v), "0") == 0;
+}
+
+/* 1 if the switch is set to exactly "1" (default: off). */
+static int env_on(const char *name)
+{
+    char v[16];
+    return strcmp(btw_env(name, v, sizeof v), "1") == 0;
 }
 
 static int write_code(void *p, const void *bytes, size_t n)
@@ -105,8 +117,10 @@ static void patch_novsync(const char *wine)
         btw_log("novsync: not running under Wine/Proton; csemu's vsync'd flip left as is");
         return;
     }
-    if (env_off("BTWSTEAM_NOVSYNC")) {
-        btw_log("novsync: BTWSTEAM_NOVSYNC=0, csemu's flip left with vsync");
+    if (!env_on("BTWSTEAM_NOVSYNC")) {
+        /* Default since 0.1.4: on a real display (nested gamescope, NVIDIA) the unthrottled
+         * flip froze the picture at the main menu; see the comment at the top. */
+        btw_log("novsync: off (default since 0.1.4; BTWSTEAM_NOVSYNC=1 turns it on), csemu's flip left with vsync");
         return;
     }
     BYTE *base = (BYTE *)GetModuleHandleA("csemu.dll");

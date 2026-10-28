@@ -20,7 +20,7 @@
 # Exit codes: 0 ok, 1 failed, 2 bad arguments, 3 game not found, 4 wrong dmcr.exe, 5 game running.
 set -euo pipefail
 
-VERSION=0.1.3
+VERSION=0.1.4
 APPID=4850
 DMCR_SHA256=3923b0ff3ae8da0584f29ae2bbf2e2deb030e57df11d37fb6fb55fa5ceb4acd6
 ICHAT_GSC_SHA256=8a0d5edcb6a207d25c14c3c2af5e8fbabbc2d08f9ed8f751e7bc9b242e14986a

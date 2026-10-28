@@ -11,6 +11,9 @@ No third-party code was used. No source file in `src/` was changed.
 
 - **0.1.3 implements proposals 1 and 2** (in memory, from `ichat.dll`, each with an off switch):
   see section 8 for what was patched and the before/after measurements.
+- **0.1.4 makes proposal 1 (novsync) opt-in** (`BTWSTEAM_NOVSYNC=1`): with it on, a player's
+  picture froze at the main menu (Proton Experimental, nested gamescope on Hyprland, NVIDIA);
+  `BTWSTEAM_NOVSYNC=0` fixed it. Section 9.
 - The game draws an **8-bit** paletted frame in system memory. `csemu.dll` (GSC's "Cossacks
   Emulator", 2011) is a complete DirectDraw wrapper. It forces a **32-bpp** display mode,
   converts 8 -> 32 bit on the CPU in its own render thread, and paces the game thread with an
@@ -312,7 +315,7 @@ the end of this section.
 
 | Switch | Default | What it does |
 |---|---|---|
-| `BTWSTEAM_NOVSYNC=0` | on under Wine/Proton, never on Windows | csemu+0x3188 `01` -> `09` (`Flip(NULL, DDFLIP_WAIT\|DDFLIP_NOVSYNC)`) |
+| `BTWSTEAM_NOVSYNC=0` | on under Wine/Proton, never on Windows (**0.1.4: off; `BTWSTEAM_NOVSYNC=1` turns it on**, section 9) | csemu+0x3188 `01` -> `09` (`Flip(NULL, DDFLIP_WAIT\|DDFLIP_NOVSYNC)`) |
 | `BTWSTEAM_NOSPIN=0` | on | `call ProcessMessages` at 0x4b15d7 (MP tick wait) and 0x4b1964 (SP frame wait) -> wrappers that wait ~1 ms when only waiting |
 
 ### What was patched
@@ -509,3 +512,93 @@ points of noise):
   `BTWSTEAM_PACING=0`.
 - **Risk.** Medium: it replaces the game's only pacing, so a bug changes SP speed. The
   byte checks, the switch and the speed test above cover that.
+
+## 9. 0.1.4: novsync made opt-in (main-menu freeze on a real display)
+
+**Report.** With 0.1.3 the picture froze at the main menu right after start, four launches in a
+row. Setup: Arch Linux, Hyprland, NVIDIA RTX 5060 Laptop (10de:2d19, driver 615.78.08; the game's
+GL is NVIDIA GLX through gamescope's Xwayland, `__GLX_VENDOR_LIBRARY_NAME=nvidia`), Proton
+Experimental 11.0 in SteamLinuxRuntime_4 (32-bit wine, `i386-unix`), launch options
+`gamescope -w 1024 -h 768 -W 1920 -H 1080 -F fsr -f -- %command%` (nested gamescope; its own
+Vulkan device is the Intel iGPU), Steam overlay loaded. 0.1.0 worked. The logs end after
+`LOBBY CREATED`; each run was killed 10-15 s after start (Steam's console log), so a hung thread
+is not established. Then the player's two runs with `BTWSTEAM_NOVSYNC=0` (nospin still on) both
+worked: 10 min, and a 17-min network game over real Steam (below).
+
+**Harness, no reproduction.** Every run 60-80 s on the main menu / attract demo, mouse moved by
+XTEST every 3 s, a screenshot every 3-4 s, thread states from `/proc`:
+
+| Runner | gamescope (headless) | novsync / nospin | Result |
+|---|---|---|---|
+| system wine 11.20 (WoW64) | `-w 1024 -h 768 -W 1920 -H 1080 -F fsr -f` | on / on | every screenshot different; demo after ~30 s; `perf:` 59.8 frames/s |
+| Proton Experimental 11.0 in SteamLinuxRuntime_4 (`tools/wine-proton-slr.sh`) | same | on / on | same: every screenshot different, demo plays |
+| same | default 1024x768 | off / off | main menu, normal |
+| Proton's wine on the host (no runtime) | same | any, also `BTWSTEAM_DISABLE=1` | not usable: stalls on a white screen (32-bit libXrandr/Xi/Xrender/Xcomposite/Xcursor missing on this host), and without `bin/Tracks` moved away csemu's CD-music thread overflows its stack (0xc00000fd, also with the hook disabled) |
+
+What the harness cannot reproduce: a real display's present path. Headless gamescope completes
+every present on its own timer; the player's nested gamescope latches frames from Hyprland's
+frame callbacks, through NVIDIA GLX on Xwayland with explicit sync and PRIME to the Intel GPU,
+plus the Steam overlay's GL hooks. Nested gamescope cannot be run without a window on the
+user's display, so it was not tried.
+
+**Code review (perf.c and csemu), what can and cannot freeze:**
+
+- *nospin* is not active in the menus: the SP wrapper (0x4b1964) is inside the in-game frame
+  function 0x4b1530, which the main menu does not call (no `perf:` line while on the menu; it
+  starts with the attract demo). Each wrapper call does at most one
+  `MsgWaitForMultipleObjectsEx` of 2 ms and always calls the real `ProcessMessages` afterwards, so
+  it cannot wait forever or starve the pump. `until_us` takes the DWORD difference as LONG, so a
+  deadline in the past is negative (no wait) and the 49.7-day `GetTickCount` wrap is handled;
+  `qpc_us` splits quotient and remainder, so any QPC frequency works without overflow. Before the
+  worker's calibration `g_timed_ok` is 0 and `g_cost_us` is 1 s, so no timed wait happens early.
+- *novsync and csemu's lock* (Ghidra, `re/ghidra-csemu`): the render thread 0x10003040 holds
+  csemu's critical section 0x10054e38 around GetAttachedSurface, `Lock(DDLOCK_WAIT)`, the 8->32
+  conversion, `Unlock`, `Blt` and `Flip`, releases it, and waits for the auto-reset event
+  0x1005525c. The game thread's present (`FlipToGDISurface` 0x10002760, called from dmcr
+  0x44fac9) only does `SetEvent` + `Sleep(n)` and never takes the lock, so the render thread
+  cannot block the game thread there, and an auto-reset event cannot make it loop on its own.
+  The game thread takes the lock only in 0x10003250 (stop the render thread: from
+  `SetDisplayMode`, `CreateSurface`, `CreatePalette` and releases): it sets a stop flag and
+  polls with `Sleep(100)` until the render thread clears it at the top of its loop. **If a flip
+  or the next back-buffer `Lock` never returns, the picture freezes, and the game thread hangs at
+  its next mode change or surface release.** With `DDFLIP_NOVSYNC` wined3d presents with swap
+  interval 0; ddraw's thread (here csemu's render thread) waits in `wined3d_cs_emit_present`
+  while the CS thread is `max_frame_latency` presents behind. A display path that does not
+  complete interval-0 swaps would block exactly there. That is the best-supported hypothesis; it
+  could not be checked on this hardware without a window on the user's display.
+
+**Decision.** The risk cannot be removed from our side, and the gain is CPU only (render thread
+3-93 % -> 2-3 % of a core; pacing unchanged either way). novsync is off by default from 0.1.4;
+`BTWSTEAM_NOVSYNC=1` turns it on (Wine/Proton only, same byte checks). nospin stays on.
+
+**Network game, mouse-lag report.** A joiner on 0.1.3 reported clear mouse lag in a game over
+real Steam (ping probably >= 50 ms, where the MP tick wait and its wrapper run). Measured:
+
+- The player's own 17-min network game over real Steam (0.1.3, `BTWSTEAM_NOVSYNC=0`, nospin on;
+  103 `perf:` windows): 32.25 game frames/s, 4 690 MP wrapper calls/s, **2.5 waits/s, 2.2 ms
+  waited per second (0.2 % of the time)**, 0.5 waits/s ended by input, 1 late wait in total.
+- Harness, copies a (host) and b (joiner), system wine, `BTWSTEAM_MOCK_LAG_MS=40` (room ping
+  ~97 ms), `BTWSTEAM_NOVSYNC=0` in all runs, 70 s matches; presents/s from Wine's `+fps` channel
+  (`wined3d_cs_exec_present`, last ~40 one-second samples), the rest from `perf:` / `timing:`:
+
+| | nospin on | `BTWSTEAM_NOSPIN=0` | nospin on, `BTWSTEAM_GAME_THREAD_RX=0` |
+|---|---|---|---|
+| presents/s a / b (min-p50-max) | 58.5-59.5-60.3 / 58.2-59.5-60.1 | 58.8-60.0-60.4 / 58.5-59.5-60.2 | 58.3-59.5-60.0 / 57.9-59.3-60.0 |
+| game frames per 10 s, steady (a, b) | 323, 322-323 | 323, 322-323 | 322-323, 322-323 |
+| MP wrapper waits per 10 s (a / b) | 26-40 / 32-36 | - | 26-30 / 25-32 |
+| time waited per 10 s (a / b) | 24-36 / 29-34 ms | - | 24-27 / 20-29 ms |
+| late waits | 0 | - | 0 |
+| receive Steam -> game p50 / p95 (a) | 7.5 / 15.1 ms | 7.3 / 15.3 ms | 13.0 / 23.4 ms |
+| game-thread receive call p50 / p95 / max | 10 / 20 / 295 us | 10 / 10 / 271 us | - |
+
+- The MP wrapper waits only when the loop would spin anyway (BL=0: no extra frame fits before
+  the tick, so nothing is drawn until the tick), each wait ends before the tick and at once on
+  input (`MWMO_INPUTAVAILABLE`), and it waits 0.2-0.4 % of the time. Present rate and game frame
+  rate are the same with and without it. It cannot explain a visible mouse lag.
+- The game-thread receive never waits for a lock (`TryEnter`), its calls take 10-20 us, and
+  turning it off only makes receive latency worse (+5.5 ms p50).
+- Not measured: the frame-interval distribution under lag (the relay trace of section 1), and
+  the joiner's own setup (its novsync state, display path, real ping). If the lag persists on
+  0.1.4, `BTWSTEAM_NOSPIN=0` and `BTWSTEAM_GAME_THREAD_RX=0` on the joiner are the next bisect
+  steps; the game's own MP pacing at high ping (32.3 game frames/s, extra frames only when they
+  fit before the tick) is the same with every switch.

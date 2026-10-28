@@ -64,8 +64,17 @@ running. The other tools read it.
 
 - Runner: `/usr/bin/wine` (wine-11.20, WoW64), with prefix `~/btw-test/prefix-<n>`. The prefix
   is created on first use with `wineboot -i` and no display. The `Graphics=x11` key forces
-  wine's X11 driver. `BTW_WINE=<Proton>/files/bin/wine` is possible but untested; Proton's wine
-  outside the Steam Linux Runtime is not needed, because system wine runs the game fine.
+  wine's X11 driver.
+- Proton (as players run it): `BTW_WINE=tools/wine-proton-slr.sh` with
+  `BTW_WINESERVER=<Proton>/files/bin/wineserver` (pass both to `stop_instance.sh` too) runs
+  Proton Experimental's wine inside SteamLinuxRuntime_4 and reaches the main menu. Give it its
+  own prefix (move `prefix-<n>` aside; run_instance.sh creates a new one with that wine) and move
+  the copy's `bin/Tracks` symlink away first (see the script's header: csemu's CD-music thread
+  overflows its stack under Proton with no audio device). Put both back afterwards.
+  `<Proton>/files/bin/wine` on the host does not work for this game (missing 32-bit X
+  libraries, white screen).
+- gamescope geometry: `BTW_GAMESCOPE_ARGS="-w 1024 -h 768 -W 1920 -H 1080 -F fsr -f"` replaces the
+  default `-W/-H/-w/-h/-r` (still `--backend headless`), e.g. to match a player's launch options.
 - DirectDraw: no fixes needed. The game runs fullscreen 1024x768 (`mode.dat`) through its own
   `csemu.dll` shim (ddraw + winmm, which loads wine's ddraw). There is no virtual desktop, no
   depth setting and no CD check. BugTrap stays as shipped.

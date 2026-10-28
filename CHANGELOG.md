@@ -3,6 +3,19 @@
 All players in one game need the same mod version. / У всех игроков в одной игре должна быть
 одна версия мода.
 
+## 0.1.4 — 2026-10-28
+
+- Fix: the picture froze at the main menu right after start on some Proton setups (reported on
+  Proton Experimental / Wine 11.0, NVIDIA, `gamescope ... -F fsr` on Hyprland). It points to the
+  0.1.3 change that makes `csemu.dll` present without vsync: with `BTWSTEAM_NOVSYNC=0` the same
+  setup works. It is now **off by default**; `BTWSTEAM_NOVSYNC=1` turns it on for those who want
+  the lower CPU use and have checked that their display path copes with it.
+- The sleeping wait loops (`BTWSTEAM_NOSPIN`) stay on: measured in a network game with ping
+  ~97 ms, they sleep about 3 ms per second and change neither the frame rate nor the game speed.
+- Исправлено: картинка замирала в главном меню сразу после запуска (Proton, NVIDIA, gamescope).
+  Вывод кадров без вертикальной синхронизации теперь выключен по умолчанию; включение:
+  `BTWSTEAM_NOVSYNC=1`.
+
 ## 0.1.3 — 2026-10-28
 
 - Less CPU under Proton/Wine: `csemu.dll`'s render thread presents without vsync (one byte

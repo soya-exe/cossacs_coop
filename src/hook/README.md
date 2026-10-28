@@ -81,7 +81,11 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
 6. **Perf patches** (`perf.c`, both in DllMain, both in memory only; numbers in
    `../../tools/PERF-RESULTS.md`, "Implemented (0.1.3)"). Each one checks its bytes first and,
    on any mismatch, logs it and leaves the code alone.
-   - **novsync** (Wine/Proton only, detected by `ntdll!wine_get_version`). csemu.dll's render
+   - **novsync** (Wine/Proton only, detected by `ntdll!wine_get_version`; **opt-in since
+     0.1.4**, `BTWSTEAM_NOVSYNC=1`). On by default in 0.1.3, it froze the picture at the main
+     menu for a player on Proton Experimental (Wine 11.0) + nested gamescope on Hyprland +
+     NVIDIA GLX, while `BTWSTEAM_NOVSYNC=0` worked there; the headless harness cannot reproduce
+     a real display's present path (`../../tools/PERF-RESULTS.md`, section 9). csemu.dll's render
      thread presents with `Flip(NULL, DDFLIP_WAIT)`; under wined3d the vsync'd flip makes its
      next back-buffer `Lock` spin (3-93 % of a core). We check csemu.dll (file size 357056,
      PE timestamp 4d26ff86, image size 5c000, checksum 59355) and the 15 bytes at csemu+0x317f
@@ -149,7 +153,7 @@ Multiplayer -> Deathmatch -> **GSC-Game.Net Internet Game** (4th button).
 | `BTWSTEAM_DEBUG=1` | log every datagram |
 | `BTWSTEAM_TIMING=1` | log latency percentiles every 10 s (`timing:` lines, see "Performance") |
 | `BTWSTEAM_GAME_THREAD_RX=0` | receive only on the worker (every 10 ms), as before 0.1.2 |
-| `BTWSTEAM_NOVSYNC=0` | keep csemu's vsync'd flip (Wine/Proton only; "How it works" 6) |
+| `BTWSTEAM_NOVSYNC=1` | csemu's flip without vsync (Wine/Proton only; off by default since 0.1.4, "How it works" 6) |
 | `BTWSTEAM_NOSPIN=0` | keep the game's busy-wait loops ("How it works" 6) |
 
 ## Log
