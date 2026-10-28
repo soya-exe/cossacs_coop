@@ -6,3 +6,4 @@ re/*.txt
 __pycache__/
 *.log
 dist/
+re/ghidra-csemu/
