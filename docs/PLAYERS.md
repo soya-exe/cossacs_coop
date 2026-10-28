@@ -102,6 +102,27 @@ when you are ready to play the network game»). Щелчок по крестик
 - Windows: «Изменение переменных среды для своей учётной записи» → создать `BTWSTEAM_NICK`, затем
   перезапустить Steam.
 
+## Производительность
+
+С версии 0.1.3 мод сам, только в памяти (файлы игры не меняются), делает две вещи:
+
+- **Под Proton/Wine:** `csemu.dll` выводит кадры без ожидания вертикальной синхронизации. Под
+  Wine это ожидание крутило поток вывода вхолостую и съедало до целого ядра процессора. Темп игры
+  не меняется: его задаёт ограничитель самой `csemu.dll` (60 кадров/с). В меню игра теперь
+  занимает в 1,5–3 раза меньше процессора, в бою — на 10–20 % меньше. В Windows эта правка не
+  включается.
+- **Везде:** в своих циклах ожидания (такт сетевой игры, конец кадра в одиночной игре) игра
+  засыпает примерно на 1 мс вместо пустого вращения. Это заметно при медленной скорости игры (до
+  целого ядра процессора) и в сетевой игре с пингом от 50 мс. Скорость игры и синхронизация по
+  сети не меняются: условие выхода из цикла остаётся игровым, а засыпание делается, только если
+  оно точно кончится раньше срока. В Windows засыпание по времени не включается (там слишком
+  грубые часы).
+
+Если заметите разрывы картинки (tearing) или что-то другое странное, эти правки отключаются в
+Steam → свойства игры → параметры запуска: `BTWSTEAM_NOVSYNC=0 %command%` (вывод с ожиданием
+синхронизации, как раньше) и/или `BTWSTEAM_NOSPIN=0 %command%` (циклы ожидания как раньше), например
+`BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0 %command%`. В Windows — переменные среды с теми же именами.
+
 ## После «Проверить целостность файлов игры»
 
 Проверка целостности в Steam (и иногда обновление игры) возвращает оригинальный `ichat.dll`, и мод
@@ -243,6 +264,27 @@ when you are ready to play the network game»). Клацання по хрест
 - Windows: «Редагування змінних середовища для вашого облікового запису» → створити
   `BTWSTEAM_NICK`, потім перезапустити Steam.
 
+## Продуктивність
+
+З версії 0.1.3 мод сам, лише в пам'яті (файли гри не змінюються), робить дві речі:
+
+- **Під Proton/Wine:** `csemu.dll` виводить кадри без очікування вертикальної синхронізації. Під
+  Wine це очікування крутило потік виводу вхолосту і з'їдало до цілого ядра процесора. Темп гри не
+  змінюється: його задає обмежувач самої `csemu.dll` (60 кадрів/с). У меню гра тепер займає
+  в 1,5–3 рази менше процесора, у бою — на 10–20 % менше. У Windows ця правка не вмикається.
+- **Скрізь:** у своїх циклах очікування (такт мережевої гри, кінець кадру в одиночній грі) гра
+  засинає приблизно на 1 мс замість порожнього обертання. Це помітно при повільній швидкості гри
+  (до цілого ядра процесора) і в мережевій грі з пінгом від 50 мс. Швидкість гри і синхронізація
+  по мережі не змінюються: умова виходу з циклу лишається ігровою, а засинання робиться, лише якщо
+  воно точно скінчиться раніше строку. У Windows засинання за часом не вмикається (там надто
+  грубий годинник).
+
+Якщо помітите розриви картинки (tearing) чи щось інше дивне, ці правки вимикаються в Steam →
+властивості гри → параметри запуску: `BTWSTEAM_NOVSYNC=0 %command%` (вивід з очікуванням
+синхронізації, як раніше) та/або `BTWSTEAM_NOSPIN=0 %command%` (цикли очікування як раніше),
+наприклад `BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0 %command%`. У Windows — змінні середовища з тими
+самими назвами.
+
 ## Після «Перевірити цілісність файлів гри»
 
 Перевірка цілісності в Steam (а іноді й оновлення гри) повертає оригінальний `ichat.dll`, і мод
@@ -380,6 +422,26 @@ follows the same rules:
 
 - Linux/Proton: Steam → game Properties → Launch options: `BTWSTEAM_NICK=Ivan %command%`;
 - Windows: "Edit environment variables for your account" → add `BTWSTEAM_NICK`, then restart Steam.
+
+## Performance
+
+Since 0.1.3 the mod does two things by itself, in memory only (no game file is changed):
+
+- **Under Proton/Wine:** `csemu.dll` presents frames without waiting for vsync. Under Wine that
+  wait made its render thread spin and burn up to a whole CPU core. The game's pace does not
+  change: `csemu.dll`'s own limiter sets it (60 frames/s). Menus now use 1.5-3 times less CPU than
+  before, battles 10-20 % less. This change is never made on Windows.
+- **Everywhere:** in its wait loops (the multiplayer tick, the end of a single-player frame) the
+  game sleeps for about 1 ms instead of spinning. This matters at a slow game speed (up to a whole
+  CPU core) and in network games with a ping of 50 ms or more. Game speed and network sync do not
+  change: the loop's exit condition stays the game's own, and a sleep is only taken if it surely
+  ends before the deadline. On Windows the timed sleeps stay off (the clock there is too coarse).
+
+If you see tearing or anything else odd, turn them off in Steam -> game Properties -> Launch
+options: `BTWSTEAM_NOVSYNC=0 %command%` (vsync'd presents, as before) and/or
+`BTWSTEAM_NOSPIN=0 %command%` (wait loops as before), e.g.
+`BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0 %command%`. On Windows, set environment variables with the
+same names.
 
 ## After "Verify integrity of game files"
 

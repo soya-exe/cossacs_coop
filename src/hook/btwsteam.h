@@ -14,6 +14,8 @@
  *   nick.c       player name sanitizer (UTF-8 Steam name -> ASCII nick; no Windows code)
  *   session.c    Steam worker thread: init, lobby, callbacks, send/receive pump
  *   timing.c     optional latency percentiles (BTWSTEAM_TIMING=1)
+ *   perf.c       optional in-memory perf patches: csemu flip without vsync (Wine only) and
+ *                sleeping instead of spinning in the game's wait loops
  *
  * Threads: the game calls the hooks on its own thread(s); everything that talks to
  * steam_api.dll runs on the single worker thread in session.c, with one exception: when
@@ -38,7 +40,7 @@
 
 /* Release version. Also embedded as the string "btwsteam-version:<version>" (log.c), which
  * the installers (installer/) look for to tell our ichat.dll from the game's. */
-#define BTWSTEAM_VERSION  "0.1.2"
+#define BTWSTEAM_VERSION  "0.1.3"
 
 /* ---- virtual LAN constants (DESIGN.md "Virtual addressing") ---- */
 #define BTW_GAME_PORT     34000          /* sockets bound to this port are hooked */
@@ -238,6 +240,11 @@ int btw_sapi_load(const char *dir);
 
 /* ---- ichat.c ---- */
 void btw_patch_login(void);     /* from DllMain: unlock the GSC-GAME.NET connection path */
+
+/* ---- perf.c ---- */
+void btw_perf_patch(void);      /* from DllMain: BTWSTEAM_NOVSYNC / BTWSTEAM_NOSPIN patches */
+void btw_perf_calibrate(void);  /* worker, once: clock step and 1 ms wait length */
+void btw_perf_dump(void);       /* worker, every 10 s: `perf:` line while a game runs */
 
 /* ---- session.c ---- */
 void btw_session_start(void);   /* from DllMain: only creates the worker thread */

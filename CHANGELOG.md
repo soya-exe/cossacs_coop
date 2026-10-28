@@ -3,6 +3,20 @@
 All players in one game need the same mod version. / У всех игроков в одной игре должна быть
 одна версия мода.
 
+## 0.1.3 — 2026-10-28
+
+- Less CPU under Proton/Wine: `csemu.dll`'s render thread presents without vsync (one byte
+  changed in memory, never on disk). Under wined3d the vsync'd flip made that thread spin at
+  3–93 % of a core; now it uses 2–3 %. Frame rate and game speed are unchanged (csemu's own
+  limiter paces the game). `BTWSTEAM_NOVSYNC=0` turns it off. Not applied on Windows.
+- The game's own wait loops (multiplayer tick, single-player end of frame) sleep ~1 ms instead
+  of spinning when a sleep surely ends before the deadline. It matters at slow game speeds (main
+  thread 99 % -> 18 % of a core) and in network games with ping >= 50 ms; game speed and
+  lockstep timing are unchanged. `BTWSTEAM_NOSPIN=0` turns it off.
+- Меньше нагрузка на процессор под Proton/Wine (вывод кадров без ожидания вертикальной
+  синхронизации, циклы ожидания засыпают вместо вращения). Отключение: `BTWSTEAM_NOVSYNC=0`,
+  `BTWSTEAM_NOSPIN=0` в параметрах запуска.
+
 ## 0.1.2 — 2026-10-28
 
 - Lower network latency: game data is taken from Steam on the game's own thread when the game

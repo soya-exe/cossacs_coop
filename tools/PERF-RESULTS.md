@@ -9,6 +9,8 @@ No third-party code was used. No source file in `src/` was changed.
 
 ## Summary
 
+- **0.1.3 implements proposals 1 and 2** (in memory, from `ichat.dll`, each with an off switch):
+  see section 8 for what was patched and the before/after measurements.
 - The game draws an **8-bit** paletted frame in system memory. `csemu.dll` (GSC's "Cossacks
   Emulator", 2011) is a complete DirectDraw wrapper. It forces a **32-bpp** display mode,
   converts 8 -> 32 bit on the CPU in its own render thread, and paces the game thread with an
@@ -119,9 +121,11 @@ FUN_004c5b00) reads 0x81d8c8. That variable is only ever written with 0 at start
     renders extra frames (0x4c8740 draw + 0x485c00 RefreshView -> FlipPages, each paced by
     csemu's Sleep) while the remaining time exceeds a moving average of their cost (0x5ac18c).
     Otherwise it **spins** on `call ProcessMessages` at **0x4b15d7** plus GetTickCount.
+    (Section 8: the loop runs only when the room's max ping is >= 50 ms, 0x8c0e68.)
   - Single player: end-of-frame wait **0x4b1964-0x4b199b**, a **busy loop** on
     `call ProcessMessages` (0x4b1964) and GetTickCount until `speed/2` ms have passed since the
-    last frame, **or for as long as the game is paused** (flag 0x8c0e14). `speed` is 0x6dd7e4 =
+    last frame, **or for as long as the game is paused** (flag 0x8c0e14; correction in section 8:
+    nothing sets that flag, and the Pause key does not use this loop). `speed` is 0x6dd7e4 =
     mode.dat field 7 (default 50 without mode.dat, clamped to <= 100 at 0x484452; 7 in this
     install, so the wait is 3.5 ms and is normally already over after csemu's sleep).
   - Single-player simulation appears to advance once per call, so **SP game speed follows the
@@ -205,7 +209,7 @@ Before = baseline untraced ranges above (base2-4). One cell per run.
 | mode.dat speed (field 7) | not a perf knob | | | | | changes SP game speed only when > 33 (speed/2 > 16.7 ms) |
 | mode.dat resolution | not measured | | | | | csemu converts w*h bytes per frame; 800x600 would cut that by 39 % but changes the game view |
 
-## 5. Proposals (not implemented)
+## 5. Proposals (1 and 2 implemented in 0.1.3, see section 8)
 
 All of these would live in our `ichat.dll`, which dmcr.exe loads as an import, so csemu.dll is
 already mapped when it initialises. Apply them only under Wine (`ntdll!wine_get_version`
@@ -298,3 +302,210 @@ What it would mean for this game:
 - Copies c and d were restored: original `csemu.dll` (sha256 45a032b0...) and `ichat.dll`, test
   `ddraw.dll` removed, prefix-c `csmt` / `renderer` / `RelayInclude` values removed.
   `Audio=""` is left in place.
+
+## 8. Implemented (0.1.3)
+
+Proposals 1 and 2 are in `src/hook/perf.c` (details and byte lists in `src/hook/README.md`,
+"How it works" 6). Both run from `ichat.dll`'s DllMain, change memory only, check their bytes
+first, and log and skip on any mismatch. Proposal 3 is not implemented; see the design note at
+the end of this section.
+
+| Switch | Default | What it does |
+|---|---|---|
+| `BTWSTEAM_NOVSYNC=0` | on under Wine/Proton, never on Windows | csemu+0x3188 `01` -> `09` (`Flip(NULL, DDFLIP_WAIT\|DDFLIP_NOVSYNC)`) |
+| `BTWSTEAM_NOSPIN=0` | on | `call ProcessMessages` at 0x4b15d7 (MP tick wait) and 0x4b1964 (SP frame wait) -> wrappers that wait ~1 ms when only waiting |
+
+### What was patched
+
+- **novsync.** `GetModuleHandleA("csemu.dll")` in our DllMain returns `10000000`: csemu.dll is a
+  static import of dmcr.exe, so it is mapped before our DllMain runs (confirmed in every run's
+  log: `novsync: csemu.dll at 10000000 (mapped before our DllMain)`). Its render thread only
+  starts in `CreatePalette`, much later. Checks: file size 357056, PE timestamp `4d26ff86`, image
+  size `5c000`, PE checksum `59355` (that is the build with sha256 `45a032b0...`), and the 15
+  bytes at csemu+0x317f `8B 08 8B 51 2C 83 C4 0C 6A 01 6A 00 50 FF D2` (no relocated address
+  inside). Then `VirtualProtect`, write `09` at +0x3188, restore, `FlushInstructionCache`. Wine
+  is detected by `ntdll!wine_get_version`.
+- **nospin.** Checks: dmcr.exe at 0x400000 with timestamp `4d2c8aaf` and image size `2317000`,
+  and the bytes of the MP loop 0x4b1570-0x4b15e9 (121), the SP loop 0x4b1948-0x4b199d (85),
+  `ProcessMessages`' prologue (24) and the clock function's head and tail (40 + 7). Then the two
+  `E8 rel32` (`E8 C4 01 FC FF`, `E8 37 FE FB FF`) get new targets: an asm thunk that passes EDI
+  (the tick deadline) and BL (the "render extra frames" flag) to the MP wrapper, and a plain
+  cdecl SP wrapper (that loop reads only globals). A wrapper waits only when the loop is just
+  waiting (MP: BL=0; with BL=1 the loop renders frames and never spins), then calls the real
+  `ProcessMessages`. The loop conditions are untouched.
+
+### Findings made while implementing
+
+- **Wine's `GetTickCount` is only as fresh as the last wineserver request.** It reads the tick
+  from the shared user data, which wineserver updates when it handles a request from any
+  process of the prefix. In an idle test program it stepped by exactly 16 ms; in the same
+  prefix while the game ran at the menu it stepped by 1-6 ms (about 340 updates/s), whatever
+  the program itself did (spin, `PeekMessage`, `Sleep(1)`, `timeBeginPeriod`). Wine's
+  `QueryPerformanceCounter` (10 MHz) is the same monotonic clock read directly: `QPC/10000`
+  equals `GetTickCount()` plus 0-16 ms. So the game clock (0x5250e0 = `GetTickCount()` + a
+  slewed MP offset/128) lags real time by up to a few ms, and the original loops leave "at the
+  deadline" only to within that lag.
+- **Wine 11's `MsgWaitForMultipleObjectsEx` with a 1 ms timeout returns at once** (WAIT_TIMEOUT
+  after 4-14 us on average); with 2 ms it waits ~1.0 ms (mean 996 us, max 1053 us). `Sleep(1)`
+  and `WaitForSingleObject(1 ms)` take 1.03-1.07 ms. The hook measures this at start and uses
+  the shortest timeout that really waits (2 ms under Wine 11.20).
+- **The SP "paused" branch is dead code in v1.35.** 0x8c0e14 is only read in the loop
+  (0x4b1969, 0x4b1994) and cleared in 0x4af000 (0x4af102, 0x4afced); nothing sets it (Ghidra
+  xrefs and a byte search agree). The game's Pause key (`PAUSE` banner) keeps calling the frame
+  function at 60 frames/s, paced by csemu's limiter; it does not spin. Section 3 and proposal 2
+  assumed a 100 % spin while paused; that was wrong. The wrapper still sleeps if the flag is
+  ever set.
+- **The SP end-of-frame wait only spins when mode.dat's speed (field 7) is above ~33.** With
+  this install's 7 it waits 3 ms, which csemu's `Sleep` has already covered: the SP wrapper is
+  called once per frame and never waits (59 calls/s, 0 waits). With speed 50 (25 ms per frame,
+  as without a mode.dat, or a slower game speed setting) it spins ~9 ms of every 26 ms frame and
+  the main thread runs at 99 % of a core, in game and while paused.
+- **The MP tick wait runs only when the room's max ping is >= 50 ms** (0x8c0e68, see the
+  multiplayer results below), and even then it spins only when less than a quarter of the
+  extra-frame cost (0x5ac18c/4, a few ms) is left before the tick; otherwise it renders extra
+  frames (BL=1, paced by csemu).
+
+### How a timed wait keeps the game's timing
+
+A wait may start only if it ends before the game clock can reach the deadline. Under Wine the
+wrapper computes the exact time left from the fresh clock: `(deadline - offset/128) * 1000 -
+QPC_us` (the game's own clock is never ahead of that). It waits only if that is at least the
+longest recent wait plus 0.36 ms (0.2 ms margin + one 0.16 ms slewing step of the MP offset).
+The longest recent wait is measured on every wait (it jumps up at once and decays by 1/64 per
+wait). The game's clock function is not called (it would slew the MP offset more often); its
+result is reproduced as `GetTickCount() + (offset >> 7)`. Timed waits switch on only if the
+worker's start-up check finds `0 <= QPC_ms - GetTickCount() <= 50` and a wait under 3 ms, which
+is the case under Wine. **On Windows only the paused wait sleeps** (no deadline there): its
+`GetTickCount` steps by ~15.6 ms and a 1 ms wait can take up to 15.6 ms, depending on the
+system timer resolution, so a timed wait could move a lockstep tick; the hook cannot know the
+time left precisely enough there. `MWMO_INPUTAVAILABLE` makes every wait return at once when
+input is queued, so input is handled as fast as before. The `perf:` line counts waits that end
+after the fresh deadline (`late`).
+
+### Measurements
+
+Same method as sections 1-2: copies c and d with our hook and the mock `steam_api.dll`, headless
+and silent (`tools/run_instance.sh`, `BTW_AUDIO=off`; every run checked: no `/dev/snd` handle at
+start and end, no "AUDIO GUARD" in run.log), per-thread CPU from `/proc` (12-25 s per phase,
+% of one core), XTEST input. "off" = `BTWSTEAM_NOVSYNC=0 BTWSTEAM_NOSPIN=0` (same as 0.1.2),
+"on" = defaults. The off and on copies ran at the same time, swapping copies between runs.
+No other test copies ran. From 15:24 the user played another Proton game on this PC: SP runs 1-3
+were before that; the speed-50, traced and multiplayer runs ran alongside it (more noise).
+
+**Menus and single player (mode.dat speed 7, as installed)**, dmcr.exe total (csemu render
+thread), three runs each:
+
+| Phase | off | on |
+|---|---|---|
+| main menu | 55.7 (43.6) / 35.2 (18.7) / 30.0 (12.2) | **16.9 (3.0) / 19.9 (3.3) / 20.7 (3.5)** |
+| attract demo | 113.4 (76.4) / 56.1 (5.7) / 95.9 (54.0) | **37.1 (1.9) / 54.4 (2.1) / 44.5 (2.0)** |
+| random-map setup | 24.0 (5.8) / 23.6 (4.0) / 24.6 (4.2) | 20.7 (3.5) / 24.3 (4.2) / 22.4 (3.7) |
+| skirmish vs 2 Easy AI | 34.7 (3.1) / 41.8 (12.9) / 32.8 (4.3) | **29.1 (3.0) / 33.4 (3.1) / 27.9 (2.9)** |
+| skirmish, paused (Pause key) | 43.8 (16.1) / 32.8 (3.8) / 24.3 (2.6) | 27.4 (2.9) / 33.6 (3.2) / 22.6 (2.5) |
+| traced run (relay): menu / demo / setup / game / paused | 20.2 / 83.6 / 91.4 / 33.6 / 28.4 | 17.2 / 42.8 / 14.2 / 29.0 / 29.0 |
+
+The render thread is at 1.9-4.2 % in every phase with the patch, against 2.6-80 % without; the
+off column is as erratic as in section 2. The main thread is unchanged (demo 28-44 %, game
+13.6-20.6 %, the game's own work). Plus 2-3 % wineserver and ~2 % gamescope+Xwayland in both.
+
+**SP game speed** (2 min 10 s of skirmish, screenshots of the in-game clock 130.4 s of wall time
+apart; game frames from the hook's `perf:` lines over the whole ~3.5 min in game):
+
+| Run | game time | bracket counter | game frames/s |
+|---|---|---|---|
+| off1 / on1 | 0:00:44 -> 0:02:54 / same | 107 -> 418 / 107 -> 418 | 59.09 / 59.04 |
+| on2 / off2 | 0:00:44 -> 0:02:54 / same | 107 -> 418 / 107 -> 420 | 59.01 / 58.99 |
+| off3 / on3 | 0:00:44 -> 0:02:54 / same | 107 -> 418 / 107 -> 419 | 58.84 / 58.98 |
+| speed 50: off / on | 0:00:44 -> 0:02:54 / same | 68 -> 270 / 69 -> 270 | **38.63 / 38.66** |
+
+The displayed game time follows wall time; the bracketed number after it advances with the
+simulation and is the same with and without the patches. Frames/s per 10 s window stayed within
+38.4-38.8 in both speed-50 runs.
+
+**Slow SP speed (mode.dat speed 50; exercises the SP timed wait)**, novsync off in both:
+
+| | off | on |
+|---|---|---|
+| skirmish: dmcr.exe / main thread | 105.6 / 98.9 | **24.3 / 17.6** |
+| paused: dmcr.exe / main thread | 105.5 / 99.3 | **26.3 / 19.9** |
+| SP wrapper calls/s, waits/s | - | 79676, 844 (81.5 % of the time waiting) |
+| waits past the fresh deadline | - | 1 of ~160 000 (35 us) |
+
+**Frame pacing** (traced runs, relay of csemu's `SetEvent`/`Sleep`, as in section 2): unchanged.
+
+| Phase | off: presents/s, interval p50 / p95 / p99 / max ms | on |
+|---|---|---|
+| menu | 60.1, 17 / 19 / 21 / 21 | 60.1, 17 / 19 / 21 / 22 |
+| demo | 59.6, 16 / 21 / 25 / 33 | 59.4, 16 / 22 / 25 / 31 |
+| setup | 60.1, 17 / 19 / 21 / 22 | 60.0, 17 / 19 / 21 / 23 |
+| skirmish | 59.9, 16 / 20 / 21 / 23 | 59.8, 16 / 20 / 22 / 23 |
+| paused | 60.0, 16 / 20 / 21 / 22 | 60.0, 16 / 20 / 21 / 23 |
+
+**Multiplayer** (copies a = host, b = joiner over the hook and the mock Steam,
+`tools/net_latency.sh` through `MATCH_SECS=130`, plus per-thread CPU 22-52 s into the match; the
+user was playing another Proton game on this PC during these runs, so CPU figures carry a few
+points of noise):
+
+| | no lag: off (mpoff2) | no lag: on (mpon2) | lag 40 ms: off | lag 40 ms: on |
+|---|---|---|---|---|
+| room max ping | 14-16 ms (earlier off run: 16-20) | **14-16 ms** | 96-99 ms | 96-98 ms |
+| match length, both copies at the end | 0:02:09 [150] / [151] | 0:02:09 [147] / [147] | 0:02:04 [149] / 0:02:05 [148] | 0:02:05 [148] / 0:02:04 [149] |
+| game frames/s, a / b (frame function, 10 s windows) | 28.91 / 28.93 | 25.9 (includes the joiner kill) / 28.26 (one window 26.4) | 32.3 in every steady window | 32.3 in every steady window |
+| drop counters (tx and rx, both copies) | all 0 | all 0 | all 0 | all 0 |
+| receive Steam -> game p50 / p95 (a) | 10.3 / 16.1 ms | 8.3 / 16.4 ms | 8.3 / 16.2 ms | 9.3 / 16.0 ms |
+| dmcr.exe, net_latency 45 s window (a / b) | 24.9 / 24.8 % | 23.5 / 30.0 % | 32.5 / 31.2 % | 35.0 / 33.5 % |
+| main / render thread, cpu2 (a) | 9.9 / 2.9 | 10.1 / 2.9 | 12.1 / 10.3 | 18.8 / 3.3 |
+| main / render thread, cpu2 (b) | 9.6 / 3.2 | 17.5 / 2.6 | 14.0 / 4.7 | 17.5 / 3.3 |
+| MP wrapper calls/s, waits/s | - | 0, 0 | - | ~5 700, 2 (0.2 % of the time) |
+
+- **No lag: the MP tick wait never runs.** The frame function enters it only when 0x8c0e68 is
+  set, and the room code (0x47fbc3, 0x483292, copied to the joiners in the start packet at
+  0x408b3c) sets it to `max(max ping, 300) + 500` ms only when the room's max ping is >= 50 ms;
+  below that it is 0 and the game's tick pacing is elsewhere. So on one PC (ping 15 ms) only
+  novsync acts in a match.
+- **With 40 ms lag (ping ~97 ms) the loop runs** but spins briefly: it spins only when less
+  than a quarter of the extra-frame cost is left before the tick, and most of those spins are
+  shorter than the ~2.2 ms a wait needs (in game, Wine's 2 ms `MsgWait` took up to 1.8-1.9 ms).
+  The wrapper waited twice a second; the game ran exactly as without it (32.3 frames/s,
+  same match clock, 0 late waits). The CPU saving in MP is therefore small; see the A/B pair
+  below for the main thread.
+- The kill-joiner check (`KILL_JOINER=1`, patches on) behaves as in 0.1.2: the host shows the
+  game's PAUSE "HostA: Ready / JoinB: Not responding." at +6 s and +15 s, "Press F3 to
+  disconnect from the game." at +40 s, and plays on at +55 s.
+- **A/B for nospin alone** (lag 40 ms, 100 s match, `BTWSTEAM_NOVSYNC=0` in both runs so only
+  the wait loop differs): main thread 14.0 / 12.6 % (a / b) with nospin, 15.6 / 16.8 % without;
+  32.3 game frames/s in every steady window in both; 1 wait/s, 0 late; all drop counters 0.
+  (The dmcr.exe totals of this pair, 26-44 %, follow the vsync spin of the render thread, which
+  was on in both.)
+
+### Design note: proposal 3, an exact-deadline frame limiter (not implemented)
+
+- **Hook point.** Redirect the `call [edx+0x28]` at dmcr 0x44fac9 (FlipPages -> csemu
+  `FlipToGDISurface`, 0x10002760) to an ichat function, checking the bytes as in the two
+  patches above. The vtable slot csemu+0x3a414 would work too, but it is in .rdata and is
+  shared by every caller; the call site affects only the game's own present.
+- **What the hook does.** Call the original first, with csemu's sleep value (object +0x2c)
+  forced to 0 before the call, so csemu still wakes its render thread (`SetEvent`) and keeps
+  its bookkeeping, but its `Sleep(n)` becomes `Sleep(0)`. Then pace on a QPC deadline:
+  `next += period`; if `now > next + period` (a load hitch), set `next = now` instead of
+  catching up with a burst. Wait in 1 ms steps while more than ~1.5 ms remain (Wine:
+  `Sleep(1)` = 1.07 ms, measured above), then `SwitchToThread`/`Sleep(0)` until `next`.
+  Never use GetTickCount for this: under Wine it lags by 0-16 ms (see above).
+- **Period.** Exactly csemu's: `QPF / refresh`, with `refresh` from `GetMonitorFrequency`
+  clamped to 40-100 Hz as in `SetDisplayMode` 0x100027f0 (read the value csemu stored rather
+  than recomputing it). SP game speed follows the present rate, so the long-run rate must
+  stay at 60.0/s; the deadline arithmetic (no `+/-1 ms` controller) keeps it exact.
+- **Expected effect.** The game-side frame interval would become 16.7 ms +/- ~0.3 ms instead
+  of the controller's 15-18 ms oscillation. With novsync the render thread flips as soon as it
+  is woken, so there is no second (vblank) clock left to beat against; the remaining doubled
+  frames (p95 21-31 ms) should mostly go. On a real display the compositor's own vblank is
+  still a second clock: gamescope/Hyprland latch the newest frame, so an occasional frame may
+  still be held for two refreshes, but much less often than with two drifting 60 Hz clocks.
+- **Cost.** The last ~0.5 ms per frame spins (about 3 % of a core at 60 Hz), roughly what
+  csemu's `Sleep` jitter costs today.
+- **Tests.** Frame interval p50/p95/p99 from the relay trace (method in section 1); SP game
+  clock against wall time over 2+ minutes (as in the table above, must stay 1.000); MP match in
+  sync; a run with `mode.dat` refresh 85 to check the period follows csemu's. Switch:
+  `BTWSTEAM_PACING=0`.
+- **Risk.** Medium: it replaces the game's only pacing, so a bug changes SP speed. The
+  byte checks, the switch and the speed test above cover that.

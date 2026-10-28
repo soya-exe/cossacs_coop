@@ -824,6 +824,7 @@ static DWORD WINAPI worker(LPVOID arg)
     (void)arg;
     name_thread();
     btw_log("worker: started");
+    btw_perf_calibrate();
     log_ccuid();
     g_steam_ok = steam_start();
     char gtrx[8];
@@ -872,6 +873,7 @@ static DWORD WINAPI worker(LPVOID arg)
             last_stats = now;
             btw_counters_dump();
             btw_timing_dump();
+            btw_perf_dump();
         }
     }
     if (g_steam_ok) {

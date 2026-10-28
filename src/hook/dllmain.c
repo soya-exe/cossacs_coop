@@ -3,8 +3,8 @@
  * sets up the machinery.
  *
  * DllMain runs under the loader lock, so it stays minimal: a critical section, the
- * log file, the IAT patch and the login code patch (plain memory writes +
- * VirtualProtect) and CreateThread.
+ * log file, the IAT patch, the login code patch and the perf patches (perf.c; plain
+ * memory writes + VirtualProtect) and CreateThread.
  * steam_api.dll is loaded later by the worker thread, which cannot start running
  * before the loader lock is released.
  */
@@ -60,6 +60,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         btw_peers_init();
         btw_log("IAT: patched %d WS2_32 slot(s) in the main module", btw_iat_patch(1));
         btw_patch_login();
+        btw_perf_patch();
         btw_session_start();
         break;
     case DLL_PROCESS_DETACH:

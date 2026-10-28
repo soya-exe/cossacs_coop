@@ -78,6 +78,41 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
    - The message sender is read at offset 12 of `SteamNetworkingMessage_t` (real 32-bit DLL),
      with 16 as the fallback. The log says which one was found.
 
+6. **Perf patches** (`perf.c`, both in DllMain, both in memory only; numbers in
+   `../../tools/PERF-RESULTS.md`, "Implemented (0.1.3)"). Each one checks its bytes first and,
+   on any mismatch, logs it and leaves the code alone.
+   - **novsync** (Wine/Proton only, detected by `ntdll!wine_get_version`). csemu.dll's render
+     thread presents with `Flip(NULL, DDFLIP_WAIT)`; under wined3d the vsync'd flip makes its
+     next back-buffer `Lock` spin (3-93 % of a core). We check csemu.dll (file size 357056,
+     PE timestamp 4d26ff86, image size 5c000, checksum 59355) and the 15 bytes at csemu+0x317f
+     (`8B 08 8B 51 2C 83 C4 0C 6A 01 6A 00 50 FF D2`), then write `09` (`DDFLIP_WAIT |
+     DDFLIP_NOVSYNC`) at csemu+0x3188. csemu.dll is a static import of dmcr.exe, so it is
+     mapped before our DllMain; its render thread starts much later. Pacing stays with csemu's
+     limiter on the game thread. On Windows nothing is changed (real fullscreen DirectDraw
+     would tear).
+   - **nospin**. The in-game frame function 0x4b1530 busy-waits in two loops that call
+     `ProcessMessages` (0x4717a0) and the game clock (0x5250e0): the MP tick wait
+     (0x4b158c-0x4b15e7, deadline in EDI, BL = "render extra frames") and the SP end-of-frame
+     wait (0x4b1964-0x4b199b, `speed/2` ms after the last frame, 0x6dd7e4 / 0x8c0e54, or while
+     0x8c0e14 is set). After checking dmcr.exe 1.35 (base 0x400000, timestamp 4d2c8aaf) and the
+     bytes of both loops, `ProcessMessages` and the clock function, the two `call
+     ProcessMessages` (0x4b15d7 `E8 C4 01 FC FF`, 0x4b1964 `E8 37 FE FB FF`) are pointed at
+     wrappers. When the loop is only waiting (MP: BL=0), a wrapper waits about 1 ms in
+     `MsgWaitForMultipleObjectsEx(QS_ALLINPUT, MWMO_INPUTAVAILABLE)` (it returns at once for
+     input) and then calls the real `ProcessMessages`. The loop conditions are the game's own.
+     A timed wait starts only if it ends before the game clock can reach the deadline. Under
+     Wine `GetTickCount` is the monotonic clock as of the last wineserver request (it lags by
+     0-16 ms) and `QueryPerformanceCounter` is the same clock read now, so the wrapper knows
+     the time left exactly; it needs the longest recent wait + 0.36 ms. The worker checks the
+     two clocks and the wait length once at start (Wine 11 returns at once from a 1 ms
+     `MsgWait`, so a 2 ms timeout is used there; it waits ~1 ms). On Windows the timed waits
+     stay off: `GetTickCount` steps by ~15.6 ms and a 1 ms wait may take 15.6 ms, so a wait
+     could move a lockstep tick; only the paused wait (no deadline) sleeps there. The game
+     clock's offset is read directly: calling 0x5250e0 would slew the MP clock offset.
+   - `perf:` lines every 10 s while a game runs: game frames (0x8c0e5c), wrapper calls and
+     waits, time waited, waits ended by input, `late` (the fresh clock passed the deadline
+     during a wait; expected 0) and the current wait length.
+
 Threads: callbacks (manual dispatch), lobby calls and sends happen on the worker thread. The
 one exception is receiving game data: when the game polls its socket (`ioctlsocket(FIONREAD)`
 or `recvfrom`) and our queue for it is empty, the game thread calls
@@ -114,6 +149,8 @@ Multiplayer -> Deathmatch -> **GSC-Game.Net Internet Game** (4th button).
 | `BTWSTEAM_DEBUG=1` | log every datagram |
 | `BTWSTEAM_TIMING=1` | log latency percentiles every 10 s (`timing:` lines, see "Performance") |
 | `BTWSTEAM_GAME_THREAD_RX=0` | receive only on the worker (every 10 ms), as before 0.1.2 |
+| `BTWSTEAM_NOVSYNC=0` | keep csemu's vsync'd flip (Wine/Proton only; "How it works" 6) |
+| `BTWSTEAM_NOSPIN=0` | keep the game's busy-wait loops ("How it works" 6) |
 
 ## Log
 
@@ -127,7 +164,8 @@ line is `HH:MM:SS.mmm [thread id] message` and goes straight to disk. It records
 - lobby events (`LOBBY CREATED <id>` / `LOBBY JOINED <id>`, `host_ready`) and slot table
   changes;
 - Steam errors;
-- a `stats:` line of counters every 10 s.
+- a `stats:` line of counters every 10 s;
+- the perf patches (`novsync:`, `nospin:`) and, while a game runs, a `perf:` line every 10 s.
 
 ## Performance (latency)
 
