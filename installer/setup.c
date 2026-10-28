@@ -632,6 +632,25 @@ static int library_game(const wchar_t *lib, wchar_t *bin)
     return game_bin_from(game, bin);
 }
 
+/* Volume serial + file index of bin\dmcr.exe: the same game reached through different paths
+ * (e.g. ~/.steam/steam is a symlink to ~/.local/share/Steam) has the same id. */
+static unsigned long long game_id(const wchar_t *bin)
+{
+    wchar_t p[PATHN];
+    BY_HANDLE_FILE_INFORMATION fi;
+    unsigned long long id = 0;
+    pjoin(p, bin, L"dmcr.exe");
+    HANDLE h = CreateFileW(p, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    if (GetFileInformationByHandle(h, &fi))
+        id = ((unsigned long long)fi.dwVolumeSerialNumber << 40) ^
+             ((unsigned long long)fi.nFileIndexHigh << 32) ^ fi.nFileIndexLow;
+    CloseHandle(h);
+    return id;
+}
+
 static int find_steam_games(plist_t *games)
 {
     plist_t roots = { 0 }, libs = { 0 };
@@ -647,9 +666,23 @@ static int find_steam_games(plist_t *games)
     if (g_wine) { /* Linux Steam seen through Wine's Z: drive */
         static const wchar_t *const rel[] = { L"/.local/share/Steam", L"/.steam/steam", L"/.steam/root",
                                               L"/.var/app/com.valvesoftware.Steam/.local/share/Steam" };
-        wchar_t home[PATHN];
-        DWORD n = GetEnvironmentVariableW(L"HOME", home, PATHN - 64);
-        if (n && n < PATHN - 64 && home[0] == L'/')
+        /* Wine does not pass $HOME to Windows programs; it sets WINEHOMEDIR = "\??\Z:\home\user".
+         * Fall back to HOME (if a launcher exported it) and to Z:\home\%USERNAME%. */
+        wchar_t home[PATHN] = L"", user[128];
+        DWORD n = GetEnvironmentVariableW(L"WINEHOMEDIR", home, PATHN - 64);
+        if (n && n < PATHN - 64 && wcsncmp(home, L"\\??\\", 4) == 0)
+            memmove(home, home + 4, (wcslen(home + 4) + 1) * sizeof *home);
+        else if (!(n && n < PATHN - 64)) {
+            n = GetEnvironmentVariableW(L"HOME", home, PATHN - 64);
+            if (!(n && n < PATHN - 64 && home[0] == L'/')) {
+                n = GetEnvironmentVariableW(L"USERNAME", user, 128);
+                if (n && n < 128)
+                    swprintf(home, PATHN - 64, L"Z:\\home\\%ls", user);
+                else
+                    home[0] = 0;
+            }
+        }
+        if (home[0])
             for (int i = 0; i < 4; i++) {
                 wcscpy(v, home);
                 wcscat(v, rel[i]);
@@ -660,10 +693,20 @@ static int find_steam_games(plist_t *games)
     }
     for (int i = 0; i < roots.n; i++)
         steam_libraries(roots.p[i], &libs);
+    unsigned long long ids[MAXLIST];
     for (int i = 0; i < libs.n; i++) {
         wchar_t bin[PATHN];
-        if (library_game(libs.p[i], bin))
-            plist_add(games, bin);
+        if (!library_game(libs.p[i], bin))
+            continue;
+        unsigned long long id = game_id(bin);
+        int dup = 0;
+        for (int j = 0; j < games->n && id; j++)
+            dup |= ids[j] == id;
+        if (dup)
+            continue;
+        if (games->n < MAXLIST)
+            ids[games->n] = id;
+        plist_add(games, bin);
     }
     return games->n;
 }

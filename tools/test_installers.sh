@@ -254,6 +254,17 @@ WS "$W/solo/btwsteam-setup.exe" --status
 expect "exe: Steam via HKLM WOW6432Node InstallPath" eval '[ $RC = 0 ] && has "Game found in the Steam library: $(winpath "$GBIN")"'
 REG delete 'HKLM\SOFTWARE\WOW6432Node\Valve\Steam' /f
 
+# Linux Steam through Wine's Z: drive, no registry: Wine hides $HOME from Windows programs and
+# sets WINEHOMEDIR instead. ~/.steam/steam and ~/.steam/root are symlinks to the same Steam, so
+# the game must be reported once.
+mkdir -p "$WINEHOME/.local/share" "$WINEHOME/.steam"
+ln -sfn "$ROOT" "$WINEHOME/.local/share/Steam"
+ln -sfn "$ROOT" "$WINEHOME/.steam/steam"; ln -sfn "$ROOT" "$WINEHOME/.steam/root"
+WS "$W/solo/btwsteam-setup.exe" --status
+expect "exe: Linux Steam via WINEHOMEDIR, no registry" eval '[ $RC = 0 ] && has "Game found in the Steam library: "'
+expect "exe: symlinked Steam roots give one game, not copies" eval '! has "another copy"'
+rm -f "$WINEHOME/.local/share/Steam" "$WINEHOME/.steam/steam" "$WINEHOME/.steam/root"
+
 cp "$SETUP" "$GAME/"
 WS "$GAME/btwsteam-setup.exe" --status
 expect "exe: finds the game from its own folder" eval '[ $RC = 0 ] && has "Game found next to the installer: $(winpath "$GBIN")"'
