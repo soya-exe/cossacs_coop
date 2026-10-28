@@ -89,8 +89,14 @@
 when you are ready to play the network game»). Щелчок по крестику в колонке Ready ничего не делает.
 Когда у всех стоят галочки, хост нажимает **Start**.
 
-Ник в игре — `Player<номер>` (номер места в лобби: у хоста 1), если не задана переменная окружения
-`BTWSTEAM_NICK` (только латиница, до 31 символа):
+Ник в игре — ваше имя в Steam. Шрифты игры знают только латиницу, поэтому кириллица (русские и
+украинские буквы) записывается латиницей («Иван Петрович» → `Ivan Petrovich`), буквы с
+диакритикой упрощаются (`Ö` → `O`), а эмодзи и прочие символы отбрасываются. Ник — не длиннее
+31 символа и не начинается с `[` («[TAG] Имя» → `TAG Imya`). Пробелы игра сама показывает как `_`.
+Если от имени ничего не осталось, ник — `Player<номер>` (номер места в лобби: у хоста 1).
+
+Другой ник можно задать переменной окружения `BTWSTEAM_NICK` — она важнее имени в Steam и
+проходит те же правила:
 
 - Linux/Proton: в Steam → свойства игры → параметры запуска: `BTWSTEAM_NICK=Ivan %command%`;
 - Windows: «Изменение переменных среды для своей учётной записи» → создать `BTWSTEAM_NICK`, затем
@@ -123,7 +129,8 @@ when you are ready to play the network game»). Щелчок по крестик
   приглашение, комната, два матча Deathmatch). Кроме того, две копии игры на одном ПК с имитацией
   Steam, в том числе с задержкой и потерей пакетов. Матчи дольше нескольких минут и игры втроём и
   больше пока не проверялись.
-- Ник — `Player<номер>`, если не задан `BTWSTEAM_NICK`.
+- Ник — только латиница: кириллица в имени Steam записывается латиницей, остальные символы
+  (эмодзи, иероглифы) пропадают. Другой ник — через `BTWSTEAM_NICK`.
 - Проверен только режим Deathmatch. Historical battle ведёт на тот же экран подключения, но с модом
   не проверялся.
 - Только Steam-версия 1.35 (`dmcr.exe` SHA-256
@@ -223,8 +230,14 @@ Steam, а ігрові пакети йдуть через сервери-рет�
 when you are ready to play the network game»). Клацання по хрестику в стовпці Ready нічого не
 робить. Коли в усіх стоять галочки, хост натискає **Start**.
 
-Нік у грі — `Player<номер>` (номер місця в лобі: у хоста 1), якщо не задано змінну середовища
-`BTWSTEAM_NICK` (лише латиниця, до 31 символу):
+Нік у грі — ваше ім'я в Steam. Шрифти гри знають лише латиницю, тому кирилиця (українські та
+російські літери) записується латиницею («Микола Гнатюк і» → `Mykola Hnatyuk i`, «Їжак» → `Yizhak`),
+літери з діакритикою спрощуються (`Ö` → `O`), а емодзі та інші символи відкидаються. Нік — не
+довший за 31 символ і не починається з `[` («[TAG] Ім'я» → `TAG Im'ya`). Пробіли гра сама показує
+як `_`. Якщо від імені нічого не залишилося, нік — `Player<номер>` (номер місця в лобі: у хоста 1).
+
+Інший нік можна задати змінною середовища `BTWSTEAM_NICK` — вона важливіша за ім'я в Steam і
+проходить ті самі правила:
 
 - Linux/Proton: у Steam → властивості гри → параметри запуску: `BTWSTEAM_NICK=Ivan %command%`;
 - Windows: «Редагування змінних середовища для вашого облікового запису» → створити
@@ -257,7 +270,8 @@ when you are ready to play the network game»). Клацання по хрест
   лобі, запрошення, кімната, два матчі Deathmatch). Крім того, дві копії гри на одному ПК з
   імітацією Steam, зокрема із затримкою та втратою пакетів. Матчі довші за кілька хвилин та ігри
   втрьох і більше поки не перевірялися.
-- Нік — `Player<номер>`, якщо не задано `BTWSTEAM_NICK`.
+- Нік — лише латиниця: кирилиця в імені Steam записується латиницею, інші символи (емодзі,
+  ієрогліфи) зникають. Інший нік — через `BTWSTEAM_NICK`.
 - Перевірено лише режим Deathmatch. Historical battle веде на той самий екран підключення, але з
   модом не перевірявся.
 - Лише Steam-версія 1.35 (`dmcr.exe` SHA-256
@@ -355,8 +369,14 @@ Whoever owns the lobby is the host.
 when you are ready to play the network game"). Clicking the cross in the Ready column does nothing.
 Once everyone has a check mark, the host clicks **Start**.
 
-Your in-game name is `Player<number>` (your slot in the lobby; the host is 1) unless the environment
-variable `BTWSTEAM_NICK` is set (ASCII only, up to 31 characters):
+Your in-game name is your Steam name. The game's fonts only have Latin letters, so Cyrillic
+(Russian and Ukrainian letters) is transliterated ("Иван Петрович" → `Ivan Petrovich`), accented
+letters lose the accent (`Ö` → `O`), and emoji and other symbols are dropped. The name is at most
+31 characters and never starts with `[` ("[TAG] Name" → `TAG Name`). The game itself shows spaces
+as `_`. If nothing is left, the name is `Player<number>` (your slot in the lobby; the host is 1).
+
+The environment variable `BTWSTEAM_NICK` sets another name. It wins over the Steam name and
+follows the same rules:
 
 - Linux/Proton: Steam → game Properties → Launch options: `BTWSTEAM_NICK=Ivan %command%`;
 - Windows: "Edit environment variables for your account" → add `BTWSTEAM_NICK`, then restart Steam.
@@ -388,7 +408,8 @@ or `bash install.sh --status`.
   room, two Deathmatch games), and with two copies of the game on one PC with a simulated Steam
   (also with lag and packet loss). Games longer than a few minutes and three or more players are
   not tested yet.
-- The name is `Player<number>` unless `BTWSTEAM_NICK` is set.
+- Names are Latin letters only: Cyrillic in the Steam name is transliterated, other characters
+  (emoji, CJK) are dropped. `BTWSTEAM_NICK` sets another name.
 - Only Deathmatch was tested. Historical battle leads to the same connection screen but has not been
   tested with the mod.
 - Steam version 1.35 only (`dmcr.exe` SHA-256

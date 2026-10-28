@@ -151,4 +151,23 @@ Result reported by the owner: both players entered the room and played. Host log
 - Friend left and re-entered the lobby twice between the games (02:02:13 left, 02:02:41
   entered, 02:02:45 left, 02:03:14 entered); cause unknown without the friend's log.
 - Noise: `call result ... (callback 1296 / 2101) failed` lines are Steam's own API calls that the
-  hook's dispatcher tries to fetch; harmless.
+  hook's dispatcher tries to fetch; harmless. Since 0.1.1 the hook fetches only its own
+  CreateLobby / JoinLobby results and counts the rest (`foreign call results` in `stats:`).
+- The joiner's `hello ... (they say slot 0, table says 2)`: the hello was queued before the joiner
+  had its slot (only logged, nothing reads it). Since 0.1.1 the hello waits for the own slot.
+
+## Nick from the Steam name, mock (2026-10-28, btwsteam 0.1.1)
+
+`tools/test_install.sh a b --hook --mock`; a: `BTWSTEAM_MOCK_PERSONA="Иван Петрович"`, b:
+`BTWSTEAM_MOCK_PERSONA="[TAG] Ölaf"` and `BTWSTEAM_JOIN=109775240000000001`; `BTWSTEAM_NICK` unset.
+Screenshots and logs: `~/btw-test/e2e-nick/`.
+
+- Logs: a `steam: persona name "Иван Петрович" (in game: "Ivan Petrovich")`, `CREATE room
+  "Ivan Petrovich's game", nick "Ivan Petrovich"`; b `persona name "[TAG] Ölaf" (in game: "TAG
+  Olaf")`, `JOIN host 10.77.0.1:34000 as "TAG Olaf"`.
+- Room (`room-a-host.png`, `room-a-with-b.png`, `room-b-joiner.png`): both list
+  **Ivan_Petrovich** and **TAG_Olaf**. The game draws the space in a nick as `_`.
+- Ready + Start (`ready-a.png`): both started (StartGSCGame on both), and both in-game lists show
+  `Ivan_Petrovich (7.20)` / `TAG_Olaf (7.20)` at game time 0:00:13 (`ingame-a.png`, `ingame-b.png`).
+  ~2150 datagrams each way, all drop counters 0.
+- Hellos: `hello from ...02 (they say slot 2, table says 2)` and `... slot 1, table says 1`.

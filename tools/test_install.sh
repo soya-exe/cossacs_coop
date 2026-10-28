@@ -34,7 +34,6 @@ done
 [ ${#names[@]} -gt 0 ] || _btw_die "no instance name (e.g. a b)"
 [ -z "$hook$steam$appid" ] && [ $restore -eq 0 ] && status=1
 
-orig_sum=$(sha256sum "$BTW_GAME_DIR/bin/ichat.dll" | cut -d' ' -f1)
 short() { [ -f "$1" ] && sha256sum "$1" | cut -c1-12 || echo "-"; }
 
 for n in "${names[@]}"; do
@@ -42,6 +41,10 @@ for n in "${names[@]}"; do
     [ -d "$BIN" ] || _btw_die "$BIN missing; run tools/mkcopies.sh $n"
     case "$BIN" in "$BTW_GAME_DIR"*) _btw_die "refusing to touch the real install" ;; esac
     if [ -f "$STATE/env" ]; then echo "[$n] warning: instance seems to be running" >&2; fi
+    # The pristine GSC ichat.dll: the copy mkcopies.sh kept, not the install's current file
+    # (a player who installed the mod in the real install has our DLL there).
+    orig=$STATE/ichat.dll.orig; [ -f "$orig" ] || orig=$BTW_GAME_DIR/bin/ichat.dll
+    orig_sum=$(sha256sum "$orig" | cut -d' ' -f1)
 
     if [ $restore -eq 1 ]; then
         cp -f "$STATE/ichat.dll.orig" "$BIN/ichat.dll"

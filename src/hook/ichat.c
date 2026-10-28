@@ -76,27 +76,22 @@ void btw_patch_login(void)
 
 /* ---- Process_GSC_ChatWindow ------------------------------------------------- */
 
-/* ASCII-only, printable, no leading '[' (that would trigger the clan HTTP check). */
-static void sanitize_nick(const char *in, char *out, size_t cap)
+/* The in-game nick: BTWSTEAM_NICK, else the Steam persona name, else Player<slot>.
+ * Both names go through btw_nick_sanitize (nick.c): Latin letters only (Cyrillic is
+ * transliterated), printable ASCII, <= 31 chars, no leading '[' (clan check). */
+static void make_nick(int slot, char out[BTW_NICK_MAX + 1])
 {
-    size_t n = 0;
-    for (; *in && n + 1 < cap; in++) {
-        unsigned char c = (unsigned char)*in;
-        if (c < 0x20 || c > 0x7e)
-            continue;
-        if (n == 0 && (c == '[' || c == ' '))
-            continue;
-        out[n++] = (char)c;
+    char name[512];
+    const char *src = "BTWSTEAM_NICK";
+    if (!btw_nick_sanitize(btw_env_utf8("BTWSTEAM_NICK", name, sizeof name), out, BTW_NICK_MAX + 1)) {
+        src = "Steam name";
+        btw_session_persona(name, sizeof name);
+        if (!btw_nick_sanitize(name, out, BTW_NICK_MAX + 1)) {
+            src = "default";
+            snprintf(out, BTW_NICK_MAX + 1, "Player%d", slot);
+        }
     }
-    out[n] = 0;
-}
-
-static void make_nick(int slot, char out[32])
-{
-    char env[128];
-    sanitize_nick(btw_env("BTWSTEAM_NICK", env, sizeof env), out, 32);
-    if (!out[0])
-        snprintf(out, 32, "Player%d", slot);
+    btw_log("ichat: nick \"%s\" (%s)", out, src);
 }
 
 /* Pump the game window's messages while we wait, so it stays responsive.
@@ -132,9 +127,14 @@ static int lobby_window(unsigned char *ri)
         }
         if (st.lobby && st.own_slot) {
             if (st.is_owner) {
-                char nick[32], room[28];
+                char nick[BTW_NICK_MAX + 1], room[28];
                 make_nick(st.own_slot, nick);
-                snprintf(room, sizeof room, "%.19s's game", nick); /* <= 26 chars */
+                int nlen = (int)strlen(nick);
+                if (nlen > 19) /* "<nick>'s game" <= 26 chars */
+                    nlen = 19;
+                while (nlen > 0 && nick[nlen - 1] == ' ')
+                    nlen--;
+                snprintf(room, sizeof room, "%.*s's game", nlen, nick);
                 memset(ri + RI_ROOM_NAME, 0, sizeof room);
                 memcpy(ri + RI_ROOM_NAME, room, strlen(room) + 1);
                 memset(ri + RI_NICK, 0, 32);
@@ -149,7 +149,7 @@ static int lobby_window(unsigned char *ri)
                 return LOBBY_RESULT_CREATE;
             }
             if (st.owner_slot && st.host_ready) {
-                char nick[32], host[20];
+                char nick[BTW_NICK_MAX + 1], host[20];
                 make_nick(st.own_slot, nick);
                 snprintf(host, sizeof host, "10.77.0.%d", st.owner_slot);
                 memset(ri + RI_NICK, 0, 32);

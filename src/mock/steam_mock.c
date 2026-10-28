@@ -918,6 +918,19 @@ void __cdecl SteamAPI_ISteamFriends_ClearRichPresence(ISteamFriends *self)
     check_self(self, &g_friends, "ClearRichPresence");
     LOG("ClearRichPresence");
 }
+/* "MockPlayer<id>", or BTWSTEAM_MOCK_PERSONA (read as Unicode, returned as UTF-8 like Steam). */
+const char * __cdecl SteamAPI_ISteamFriends_GetPersonaName(ISteamFriends *self)
+{
+    static char name[256];
+    wchar_t w[128];
+    DWORD n;
+    check_self(self, &g_friends, "GetPersonaName");
+    n = GetEnvironmentVariableW(L"BTWSTEAM_MOCK_PERSONA", w, 128);
+    if (n == 0 || n >= 128 || !WideCharToMultiByte(CP_UTF8, 0, w, -1, name, sizeof name, NULL, NULL))
+        snprintf(name, sizeof name, "MockPlayer%u", g_id);
+    LOG("GetPersonaName -> \"%s\"", name);
+    return name;
+}
 void __cdecl SteamAPI_ISteamFriends_ActivateGameOverlayInviteDialog(ISteamFriends *self, CSteamID_u64 lobby)
 {
     check_self(self, &g_friends, "ActivateGameOverlayInviteDialog");

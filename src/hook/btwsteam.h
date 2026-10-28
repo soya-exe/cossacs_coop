@@ -11,6 +11,7 @@
  *   peers.c      lobby member table (slot <-> SteamID), wire format, outbound queue,
  *                keep-alive / timeout bookkeeping
  *   steam_api.c  dynamic loading of steam_api.dll (flat API only)
+ *   nick.c       player name sanitizer (UTF-8 Steam name -> ASCII nick; no Windows code)
  *   session.c    Steam worker thread: init, lobby, callbacks, send/receive pump
  *
  * Threads: the game calls the hooks on its own thread(s); everything that talks to
@@ -29,10 +30,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "nick.h"
 
 /* Release version. Also embedded as the string "btwsteam-version:<version>" (log.c), which
  * the installers (installer/) look for to tell our ichat.dll from the game's. */
-#define BTWSTEAM_VERSION  "0.1.0"
+#define BTWSTEAM_VERSION  "0.1.1"
 
 /* ---- virtual LAN constants (DESIGN.md "Virtual addressing") ---- */
 #define BTW_GAME_PORT     34000          /* sockets bound to this port are hooked */
@@ -69,6 +71,8 @@ void btw_unlock(void);
 /* Returns the environment variable's value in buf (empty string if unset). */
 const char *btw_env(const char *name, char *buf, size_t cap);
 int btw_env_flag(const char *name);      /* 1 if set to something other than "0" */
+/* Same, but read as Unicode and returned as UTF-8 (for names that may hold Cyrillic). */
+const char *btw_env_utf8(const char *name, char *buf, size_t cap);
 
 /* ---- log.c ---- */
 void btw_log_init(void);
@@ -82,6 +86,7 @@ typedef struct {
     volatile LONG rx_pkts, rx_bytes, rx_game_reads;
     volatile LONG rx_drop_unknown, rx_drop_bad, rx_drop_nosock, rx_drop_qfull, rx_drop_noslot;
     volatile LONG ctrl_tx, ctrl_rx;
+    volatile LONG foreign_results;   /* call results (703) for Steam's own calls, not fetched */
 } btw_counters_t;
 extern btw_counters_t g_ctr;
 #define BTW_INC(f)      InterlockedIncrement(&g_ctr.f)
@@ -193,6 +198,7 @@ typedef struct {
     bool     (__cdecl *FR_SetRichPresence)(void *self, const char *k, const char *v);
     void     (__cdecl *FR_ClearRichPresence)(void *self);
     void     (__cdecl *FR_ActivateGameOverlayInviteDialog)(void *self, uint64_t lobby);
+    const char *(__cdecl *FR_GetPersonaName)(void *self);   /* UTF-8 */
     void    *(__cdecl *SteamNetworkingMessages)(void);
     int      (__cdecl *NM_SendMessageToUser)(void *self, const btw_ident_t *to, const void *data,
                                              uint32_t len, int flags, int channel);
@@ -228,5 +234,8 @@ typedef struct {
 void btw_session_get(btw_lobby_state_t *out);
 /* Owner: publish host_ready=1 (done by the worker within ~10 ms). */
 void btw_session_request_host_ready(void);
+/* The Steam persona name (UTF-8, as Steam returns it) read by the worker at init;
+ * "" without Steam. */
+void btw_session_persona(char *out, size_t cap);
 
 #endif

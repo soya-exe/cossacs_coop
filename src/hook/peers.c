@@ -22,6 +22,7 @@ typedef struct {
     DWORD    last_heard;    /* GetTickCount of the last message (or of joining) */
     int      alive;         /* 0 after BTW_PEER_TIMEOUT_MS of silence or a goodbye */
     int      logged_send, logged_recv;
+    int      hello_sent;    /* sent once our own slot is known, so it carries the real slot */
 } peer_t;
 
 /* all protected by btw_lock */
@@ -173,7 +174,6 @@ void btw_peers_update(const uint64_t *ids, const int *slots, int n)
             next[nn].last_heard = now; /* grace period starts now */
             next[nn].alive = 1;
             btw_log("peers: member %llu joined the table, slot %d", (unsigned long long)ids[i], slots[i]);
-            push_ctrl_locked(ids[i], BTW_CTRL_HELLO);
             changed = 1;
         }
         next[nn].slot = slots[i];
@@ -200,8 +200,17 @@ void btw_peers_update(const uint64_t *ids, const int *slots, int n)
         InterlockedExchange(&g_own_slot, own);
         changed = 1;
     }
-    if (own)
+    if (own) {
         SetEvent(g_slot_event);
+        /* Hello only now: a joiner learns its slot a little after it sees the members, and the
+         * hello says which slot we have. Nothing depends on it (it is logged; keep-alives
+         * open the Steam session anyway). */
+        for (int i = 0; i < g_npeers; i++)
+            if (!g_peers[i].hello_sent) {
+                g_peers[i].hello_sent = 1;
+                push_ctrl_locked(g_peers[i].id, BTW_CTRL_HELLO);
+            }
+    }
 
     if (changed) {
         char line[600];

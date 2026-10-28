@@ -1,7 +1,7 @@
 # Mock steam_api.dll (tests only)
 
 A 32-bit stand-in for `steam_api.dll` so that two or more game processes on one PC (Wine,
-Proton or Windows) can test btwsteam without two Steam accounts. It exports exactly the 36
+Proton or Windows) can test btwsteam without two Steam accounts. It exports exactly the 37
 flat functions in `steam_flat.h` with the real signatures (cdecl). Every process is one fake
 Steam user and runs a small "Steam backend" on UDP `127.0.0.1:(47000 + id)`. There is no
 shared memory, so separate Wine prefixes work too.
@@ -25,6 +25,7 @@ To use it in a test install, copy `build/mock/steam_api.dll` over the real one i
 | `BTWSTEAM_MOCK_LOSS` | 0..1: the chance that an **unreliable** send is silently dropped (the send still returns OK). Sends with the Reliable flag (8) are never dropped. Applied by the sender. |
 | `BTWSTEAM_MOCK_INVITE` | A lobby id. Callback 333 `GameLobbyJoinRequested_t {lobby, friend = lobby's owner}` fires 3 s after `InitFlat`, as if the user accepted a Steam invite. |
 | `BTWSTEAM_MOCK_TIMEOUT_MS` | Lobby keep-alive timeout (default 5000). See "Lobbies". |
+| `BTWSTEAM_MOCK_PERSONA` | What `GetPersonaName` returns (UTF-8, e.g. Cyrillic). Default `MockPlayer<id>`. |
 
 The log goes to `steam_mock_<id>.log` next to the exe, appending, with timestamps.
 
@@ -62,6 +63,8 @@ because the backend runs on its own thread, so callbacks queue up whether or not
   killed game process shows up.
 - `GetLobbyData` returns "" if the key is missing or you are not in that lobby. The returned
   pointer stays valid for the next 7 calls.
+- `GetPersonaName` returns `BTWSTEAM_MOCK_PERSONA` (read as Unicode, returned as UTF-8 like real
+  Steam) or `MockPlayer<id>`.
 - `InviteUserToLobby`, `SetRichPresence`, `ClearRichPresence` and
   `ActivateGameOverlayInviteDialog` only log.
 - One lobby per process.

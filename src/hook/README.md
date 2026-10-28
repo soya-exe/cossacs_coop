@@ -12,11 +12,18 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
    installer keeps the original as `ichat_orig.dll`, but we never load or call it.
    - `Process_GSC_ChatWindow(true, RoomInfo*)` is the "lobby". It waits, pumping window
      messages, until the Steam lobby is ready and our slot is known. Then:
-     - **lobby owner**: fills +0x00 room name (`<nick>'s game`), +0x80 nick, and +0x124 max
-       players = 7. It returns 1 (create room) and publishes lobby data `host_ready=1`.
+     - **lobby owner**: fills +0x00 room name (`<nick>'s game`, at most 26 chars), +0x80 nick,
+       and +0x124 max players = 7. It returns 1 (create room) and publishes lobby data `host_ready=1`.
      - **member**: waits for `host_ready=1`, then fills the nick, max players and +0xc0
        `10.77.0.<owner slot>`. It returns 2 (join that host on :34000).
      - Esc while waiting, or no Steam: returns 0.
+   - The nick is `BTWSTEAM_NICK`, else the Steam persona name, else `Player<slot>`. Both names
+     are UTF-8 and go through `btw_nick_sanitize` (`nick.c`), because the nick travels as
+     `nick[32]` in the game's join request and is drawn with the game's bitmap fonts:
+     Cyrillic (Russian, Ukrainian) is transliterated to Latin, Latin letters lose diacritics,
+     other non-ASCII (emoji, CJK) is dropped, spaces collapse, at most 31 chars, and no leading
+     `[` (clan HTTP check): `[TAG] Ölaf` -> `TAG Olaf`, `Иван Петрович` -> `Ivan Petrovich`.
+     The game shows spaces in nicks as `_`. Unit test: `tools/test_nick.sh` (host gcc).
    - `Process_GSC_ChatWindow(false, ...)` (the chat button in the room) returns 0.
      `GetGameID` writes "". Everything else is a no-op (logged once).
 2. **Menu unlock** (`ichat.c`). The GSC-GAME.NET connection type (4th button) normally fails
@@ -47,6 +54,8 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
    from the exe folder: flat API only, through `GetProcAddress`, and never from DllMain. It
    writes `steam_appid.txt` (4850) if the file is missing. Manual callback dispatch runs every
    10 ms, or at once when the game sends.
+   - After init it reads the persona name (`ISteamFriends::GetPersonaName`, optional export)
+     for the nick.
    - With no join target, it creates a friends-only lobby for 7 players. It sets lobby data
      `btwsteam=1`, `ver=1` and rich presence `connect=+connect_lobby <id>`.
    - The owner assigns slots in lobby data: `slot_<steamid64>` = N. The owner prefers 1,
@@ -59,7 +68,10 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
      not yet listed is held for 15 s.
    - Channel 0 carries game datagrams: unreliable + NoNagle, with the 6-byte header
      `u8 ver=1, u8 kind, u16 src_port BE, u16 dst_port BE`. Channel 1 carries reliable
-     control messages (hello / keep-alive every 1 s / goodbye).
+     control messages (hello / keep-alive every 1 s / goodbye). The hello goes to each member
+     once our own slot is known, so it carries the real slot; nothing depends on it.
+   - Call results (703) are fetched only for the CreateLobby / JoinLobby calls we issued.
+     Steam's own (callbacks 1296, 2101, ...) are counted as `foreign call results` in `stats:`.
    - A member silent for 30 s gets nothing forwarded until it talks again. Nothing else
      happens: the game has its own 20 s timeout, and we never inject packets.
    - The message sender is read at offset 12 of `SteamNetworkingMessage_t` (real 32-bit DLL),
@@ -84,7 +96,7 @@ Multiplayer -> Deathmatch -> **GSC-Game.Net Internet Game** (4th button).
 | Environment / argument | Effect |
 |---|---|
 | `+connect_lobby <id>`, `-steamjoin <id>`, `BTWSTEAM_JOIN=<id>` | join that lobby at start |
-| `BTWSTEAM_NICK=<name>` | player name (ASCII; leading `[` removed; default `Player<slot>`) |
+| `BTWSTEAM_NICK=<name>` | player name instead of the Steam name (UTF-8, sanitized like it; see 1.) |
 | `BTWSTEAM_INVITE=1` | open the overlay invite dialog once the lobby exists |
 | `BTWSTEAM_INVITE_IDS=<id>,<id>` | `InviteUserToLobby` these SteamIDs once the lobby exists |
 | `BTWSTEAM_APPID=<n>` | set `SteamAppId`/`SteamGameId` before init (e.g. 480) |

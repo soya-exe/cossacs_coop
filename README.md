@@ -32,6 +32,7 @@ Needs `mingw-w64-gcc` (i686).
 tools/build.sh        # build/ichat.dll
 tools/build_mock.sh   # build/mock/steam_api.dll (tests only) + test_mock.exe
 tools/test_mock.sh    # mock Steam self-test under wine
+tools/test_nick.sh    # unit test of the nick sanitizer (host gcc)
 tools/build_installer.sh  # build/btwsteam-setup.exe (Windows installer, DLLs embedded)
 tools/package.sh      # dist/cossacks-steam-coop-<version>/ and .zip (installers + DLLs + PLAYERS.md)
 tools/test_installers.sh  # installer tests: install.sh and setup.exe (wine) on a fake Steam tree

@@ -215,6 +215,7 @@ BTW_SFLAT_ASSERT(sizeof(SteamNetworkingMessage_t) == 208, "msg size");
     X(bool,           SteamAPI_ISteamFriends_SetRichPresence, (ISteamFriends *self, const char *pchKey, const char *pchValue)) \
     X(void,           SteamAPI_ISteamFriends_ClearRichPresence, (ISteamFriends *self)) \
     X(void,           SteamAPI_ISteamFriends_ActivateGameOverlayInviteDialog, (ISteamFriends *self, CSteamID_u64 steamIDLobby)) \
+    X(const char *,   SteamAPI_ISteamFriends_GetPersonaName, (ISteamFriends *self)) /* UTF-8 */ \
     X(ISteamNetworkingMessages *, SteamAPI_SteamNetworkingMessages_SteamAPI_v002, (void)) \
     X(EResult,        SteamAPI_ISteamNetworkingMessages_SendMessageToUser, (ISteamNetworkingMessages *self, const SteamNetworkingIdentity *identityRemote, const void *pubData, uint32_t cubData, int nSendFlags, int nRemoteChannel)) \
     X(int,            SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel, (ISteamNetworkingMessages *self, int nLocalChannel, SteamNetworkingMessage_t **ppOutMessages, int nMaxMessages)) \

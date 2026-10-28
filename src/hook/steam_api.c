@@ -47,6 +47,7 @@ static const sym_t k_syms[] = {
     R(FR_SetRichPresence,          "SteamAPI_ISteamFriends_SetRichPresence"),
     O(FR_ClearRichPresence,        "SteamAPI_ISteamFriends_ClearRichPresence"),
     O(FR_ActivateGameOverlayInviteDialog, "SteamAPI_ISteamFriends_ActivateGameOverlayInviteDialog"),
+    O(FR_GetPersonaName,           "SteamAPI_ISteamFriends_GetPersonaName"),
     R(SteamNetworkingMessages,     "SteamAPI_SteamNetworkingMessages_SteamAPI_v002"),
     R(NM_SendMessageToUser,        "SteamAPI_ISteamNetworkingMessages_SendMessageToUser"),
     R(NM_ReceiveMessagesOnChannel, "SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel"),

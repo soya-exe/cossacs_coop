@@ -53,6 +53,10 @@ static uint64_t g_self;
 static uint64_t g_lobby;        /* lobby we are in (0 = none) */
 static uint64_t g_joining;      /* JoinLobby in flight */
 static int g_creating;          /* CreateLobby in flight */
+/* Call handles we issued (CreateLobby / JoinLobby). Only their call results (703) are
+ * fetched; Steam's own calls (e.g. callbacks 1296, 2101 on real Steam) are only counted. */
+static uint64_t g_create_call, g_join_call;
+static char g_persona[128];     /* Steam persona name (UTF-8), under btw_lock */
 static int g_host_setup_done;   /* lobby data / rich presence set for g_lobby */
 static int g_invite_done;
 static DWORD g_retry_create_at; /* CreateLobby failed: try again at this tick */
@@ -242,6 +246,7 @@ static void create_lobby(void)
         return;
     uint64_t call = S.MM_CreateLobby(g_mm, LOBBY_TYPE_FRIENDS_ONLY, LOBBY_MAX_MEMBERS);
     g_creating = call != 0;
+    g_create_call = call;
     btw_log("steam: CreateLobby(friends-only, %d) call %llu%s", LOBBY_MAX_MEMBERS,
             (unsigned long long)call, call ? "" : " FAILED");
     if (!call)
@@ -252,6 +257,7 @@ static void join_lobby(uint64_t id)
 {
     g_joining = id;
     uint64_t call = S.MM_JoinLobby(g_mm, id);
+    g_join_call = call;
     btw_log("steam: JoinLobby(%llu) call %llu", (unsigned long long)id, (unsigned long long)call);
 }
 
@@ -500,12 +506,20 @@ static void dispatch(void)
             uint32_t sz = rd32(m.param + 12);
             static uint64_t buf[1024 / 8]; /* 8-aligned */
             bool failed = false;
-            if (sz <= sizeof buf &&
-                S.MD_GetAPICallResult(g_pipe, call, buf, (int)sz, cb, &failed) && !failed)
-                handle_callback(cb, (const uint8_t *)buf, (int)sz);
-            else
-                btw_log("steam: call result %llu (callback %d, %u bytes) failed", (unsigned long long)call,
-                        cb, sz);
+            if (!call || (call != g_create_call && call != g_join_call)) {
+                BTW_INC(foreign_results); /* Steam's own call: not ours to fetch or log */
+            } else {
+                if (call == g_create_call)
+                    g_create_call = 0;
+                else
+                    g_join_call = 0;
+                if (sz <= sizeof buf &&
+                    S.MD_GetAPICallResult(g_pipe, call, buf, (int)sz, cb, &failed) && !failed)
+                    handle_callback(cb, (const uint8_t *)buf, (int)sz);
+                else
+                    btw_log("steam: call result %llu (callback %d, %u bytes) failed",
+                            (unsigned long long)call, cb, sz);
+            }
         } else if (m.param) {
             handle_callback(m.callback, m.param, m.param_size);
         }
@@ -608,6 +622,19 @@ static void ensure_appid_file(void)
     btw_log("steam: wrote %s (4850)", path);
 }
 
+/* The Steam name, for the in-game nick (ichat.c make_nick). */
+static void read_persona(void)
+{
+    const char *p = S.FR_GetPersonaName ? S.FR_GetPersonaName(g_fr) : NULL;
+    char nick[BTW_NICK_MAX + 1];
+    btw_lock();
+    snprintf(g_persona, sizeof g_persona, "%s", p ? p : "");
+    btw_unlock();
+    btw_nick_sanitize(p, nick, sizeof nick);
+    btw_log("steam: persona name \"%s\" (in game: \"%s\")", p ? p : "(GetPersonaName missing)",
+            nick[0] ? nick : "nothing usable, Player<slot>");
+}
+
 static int steam_start(void)
 {
     if (btw_env_flag("BTWSTEAM_NOSTEAM")) {
@@ -652,6 +679,7 @@ static int steam_start(void)
     g_self = S.User_GetSteamID(g_user);
     btw_peers_set_self(g_self);
     btw_log("steam: initialised, SteamID %llu, pipe %d", (unsigned long long)g_self, (int)g_pipe);
+    read_persona();
     if (g_nu && S.NU_SetGlobalConfigValueInt32) {
         S.NU_SetGlobalConfigValueInt32(g_nu, CFG_SEND_BUFFER_SIZE, 4 * 1024 * 1024);
         S.NU_SetGlobalConfigValueInt32(g_nu, CFG_RECV_BUFFER_SIZE, 4 * 1024 * 1024);
@@ -690,6 +718,13 @@ void btw_session_get(btw_lobby_state_t *out)
 {
     btw_lock();
     *out = g_state;
+    btw_unlock();
+}
+
+void btw_session_persona(char *out, size_t cap)
+{
+    btw_lock();
+    snprintf(out, cap, "%s", g_persona);
     btw_unlock();
 }
 

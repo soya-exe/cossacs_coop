@@ -25,6 +25,18 @@ const char *btw_env(const char *name, char *buf, size_t cap)
     return buf;
 }
 
+const char *btw_env_utf8(const char *name, char *buf, size_t cap)
+{
+    wchar_t wname[64], w[256];
+    buf[0] = 0;
+    if (!MultiByteToWideChar(CP_ACP, 0, name, -1, wname, 64))
+        return buf;
+    DWORD n = GetEnvironmentVariableW(wname, w, 256);
+    if (n == 0 || n >= 256 || !WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, (int)cap, NULL, NULL))
+        buf[0] = 0;
+    return buf;
+}
+
 int btw_env_flag(const char *name)
 {
     char v[16];

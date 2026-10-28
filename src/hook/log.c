@@ -89,9 +89,9 @@ void btw_counters_dump(void)
     btw_counters_t c = g_ctr; /* racy snapshot, fine for statistics */
     btw_log("stats: tx uni %ld bcast-dropped %ld bytes %ld loop %ld | tx drop nonvlan %ld noslot %ld dead %ld "
             "queue %ld steamerr %ld | rx %ld bytes %ld reads %ld | rx drop unknown %ld bad %ld "
-            "nosock %ld qfull %ld noslot %ld | ctrl tx %ld rx %ld",
+            "nosock %ld qfull %ld noslot %ld | ctrl tx %ld rx %ld | foreign call results %ld",
             c.tx_uni, c.tx_bcast, c.tx_bytes, c.tx_loop, c.tx_drop_nonvlan, c.tx_drop_noslot,
             c.tx_drop_dead, c.tx_drop_queue, c.tx_steam_err, c.rx_pkts, c.rx_bytes,
             c.rx_game_reads, c.rx_drop_unknown, c.rx_drop_bad, c.rx_drop_nosock, c.rx_drop_qfull,
-            c.rx_drop_noslot, c.ctrl_tx, c.ctrl_rx);
+            c.rx_drop_noslot, c.ctrl_tx, c.ctrl_rx, c.foreign_results);
 }

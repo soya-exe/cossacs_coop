@@ -294,6 +294,15 @@ int main(int argc, char **argv)
           (unsigned long long)p_SteamAPI_ISteamUser_GetSteamID(s_user), (unsigned long long)my_sid);
     CHECK(p_SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32(s_nu, k_ESteamNetworkingConfig_RecvMaxMessageSize, 32 << 20),
           "SetGlobalConfigValueInt32");
+    {
+        /* GetPersonaName: "MockPlayer<id>" unless BTWSTEAM_MOCK_PERSONA is set */
+        char want[64]; const char *got = p_SteamAPI_ISteamFriends_GetPersonaName(s_fr);
+        snprintf(want, sizeof want, "MockPlayer%u", my_id);
+        if (!GetEnvironmentVariableA("BTWSTEAM_MOCK_PERSONA", NULL, 0))
+            CHECK(got && !strcmp(got, want), "GetPersonaName \"%s\", want \"%s\"", got ? got : "(null)", want);
+        else
+            CHECK(got && got[0], "GetPersonaName empty with BTWSTEAM_MOCK_PERSONA set");
+    }
 
     if (is_host) {
         DeleteFileA(lobbyfile);
