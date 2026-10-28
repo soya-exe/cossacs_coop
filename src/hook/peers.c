@@ -110,6 +110,7 @@ void btw_outq_push_locked(uint64_t to, int channel, const void *data, int len)
     m->to = to;
     m->channel = channel;
     m->len = len;
+    m->t_us = g_timing && channel == BTW_CH_DATA ? btw_now_us() : 0;
     if (len > 0)
         memcpy(m->data, data, (size_t)len);
     if (g_outq_tail)
@@ -292,7 +293,8 @@ int btw_peers_send_locked(int dst_slot, uint16_t src_port, uint16_t dst_port,
     return n;
 }
 
-void btw_peers_on_message(uint64_t from, int channel, const uint8_t *data, int len)
+void btw_peers_on_message(uint64_t from, int channel, const uint8_t *data, int len,
+                          int64_t t_steam_us)
 {
     btw_lock();
     peer_t *p = find_peer_locked(from);
@@ -350,7 +352,7 @@ void btw_peers_on_message(uint64_t from, int channel, const uint8_t *data, int l
                 (unsigned long long)from, p->slot, data[1] == BTW_KIND_BCAST ? "broadcast" : "unicast",
                 plen, sport, dport);
     }
-    btw_vlan_deliver_locked(p->slot, sport, dport, data + BTW_WIRE_HDR, plen);
+    btw_vlan_deliver_locked(p->slot, sport, dport, data + BTW_WIRE_HDR, plen, t_steam_us);
     btw_unlock();
     BTW_INC(rx_pkts);
     BTW_ADD(rx_bytes, plen);

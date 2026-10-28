@@ -156,6 +156,8 @@ of these are real per-copy files. Each copy gets its own player name: `players.t
 | `tools/btwinput.py` | mouse and keyboard input, window list, fallback screenshot |
 | `tools/btwlaunch.c` | stand-in for the csbtw.exe launcher (creates csemu's event) |
 | `tools/verify_install.sh` | prove the real install is unchanged |
+| `tools/net_latency.sh` | two-copy latency run: room ping strip, match, CPU, `BTWSTEAM_TIMING` summary (`~/btw-test/latency/`) |
+| `tools/timing_summary.py` | percentiles from the hook's `timing:` and the mock's `delivery:` log lines |
 
 Environment variables: `BTW_TEST_ROOT` (~/btw-test), `BTW_GAME_DIR`, `BTW_TIMEOUT` (600),
 `BTW_SHOT_EVERY` (10), `BTW_RES` (1024x768), `BTW_AUDIO` (off), `BTW_WINEDEBUG` (-all),

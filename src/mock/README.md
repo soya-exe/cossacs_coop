@@ -1,7 +1,7 @@
 # Mock steam_api.dll (tests only)
 
 A 32-bit stand-in for `steam_api.dll` so that two or more game processes on one PC (Wine,
-Proton or Windows) can test btwsteam without two Steam accounts. It exports exactly the 37
+Proton or Windows) can test btwsteam without two Steam accounts. It exports exactly the 38
 flat functions in `steam_flat.h` with the real signatures (cdecl). Every process is one fake
 Steam user and runs a small "Steam backend" on UDP `127.0.0.1:(47000 + id)`. There is no
 shared memory, so separate Wine prefixes work too.
@@ -21,7 +21,7 @@ To use it in a test install, copy `build/mock/steam_api.dll` over the real one i
 | Variable | Meaning |
 |---|---|
 | `BTWSTEAM_MOCK_ID` | Player number 1..1000 (default 1). SteamID = 76561190000000000 + id; UDP port 47000 + id. Two processes with the same id: the second one's `SteamAPI_InitFlat` returns 1. |
-| `BTWSTEAM_MOCK_LAG_MS` | Delay, in ms, before this process handles any incoming packet (lobby traffic and messages). It is one-way: set it on both processes to get an RTT of 2 x lag. |
+| `BTWSTEAM_MOCK_LAG_MS` | Delay, in ms, before this process handles any incoming packet (lobby traffic and messages). It is one-way: set it on both processes to get an RTT of 2 x lag. Held packets are released on time (the backend wakes for the next one due, to within ~1 ms; before 0.1.2 up to 5 ms late). |
 | `BTWSTEAM_MOCK_LOSS` | 0..1: the chance that an **unreliable** send is silently dropped (the send still returns OK). Sends with the Reliable flag (8) are never dropped. Applied by the sender. |
 | `BTWSTEAM_MOCK_INVITE` | A lobby id. Callback 333 `GameLobbyJoinRequested_t {lobby, friend = lobby's owner}` fires 3 s after `InitFlat`, as if the user accepted a Steam invite. |
 | `BTWSTEAM_MOCK_TIMEOUT_MS` | Lobby keep-alive timeout (default 5000). See "Lobbies". |
@@ -91,6 +91,15 @@ because the backend runs on its own thread, so callbacks queue up whether or not
   but there is no retransmission. Localhost UDP loses packets only if the receive buffer
   overflows, and the backend thread drains the socket all the time.
 - `SetGlobalConfigValueInt32` logs and returns true.
+- `m_usecTimeReceived` is the time the message became ready in this process (after the lag),
+  and `GetLocalTimestamp` returns the same clock (QueryPerformanceCounter in us), as on real
+  Steam, so the hook's `BTWSTEAM_TIMING` can measure how long a message waited for it.
+- Every 10 s the log gets `delivery: n p50 p95 max us`: one-way time from the sender's
+  `SendMessageToUser` to "ready" here, lag included. Both processes are on one PC, so the
+  sender's timestamp in the wire header uses the same clock. It is the mock's own share of
+  the latency (about 0.2 ms at p50 with no lag), to keep apart from the hook's.
+- The backend thread is named `steam-mock` (`SetThreadDescription`), so on Wine it does not
+  inherit the name of the hook's `btwsteam-worker` thread that created it.
 
 ## Not covered
 

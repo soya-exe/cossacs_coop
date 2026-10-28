@@ -30,6 +30,7 @@ typedef struct dgram {
     int      slot;        /* sender's slot -> from = 10.77.0.slot */
     uint16_t src_port;    /* sender's bound port (host order) */
     int      len;
+    int64_t  t_pick, t_steam; /* BTWSTEAM_TIMING: queued here / received by Steam (0 = unknown) */
     uint8_t  data[];
 } dgram_t;
 
@@ -121,7 +122,7 @@ static int fail(int wsa_error)
 }
 
 void btw_vlan_deliver_locked(int from_slot, uint16_t src_port, uint16_t dst_port,
-                             const uint8_t *data, int len)
+                             const uint8_t *data, int len, int64_t t_steam_us)
 {
     vsock_t *v = find_hooked_port_locked(dst_port);
     if (!v) {
@@ -149,6 +150,8 @@ void btw_vlan_deliver_locked(int from_slot, uint16_t src_port, uint16_t dst_port
     d->slot = from_slot;
     d->src_port = src_port;
     d->len = len;
+    d->t_pick = g_timing ? btw_now_us() : 0;
+    d->t_steam = t_steam_us;
     memcpy(d->data, data, (size_t)len);
     if (v->tail)
         v->tail->next = d;
@@ -294,6 +297,15 @@ int WSAAPI btw_hook_ioctlsocket(SOCKET s, long cmd, u_long *argp)
             /* size of the next datagram, as the game reads one datagram per call */
             u_long n = v->head ? (u_long)v->head->len : 0;
             btw_unlock();
+            if (!n) {
+                /* nothing queued: ask Steam directly instead of waiting for the worker */
+                btw_session_rx_from_game();
+                btw_lock();
+                v = find_locked(s);
+                n = v && v->hooked && v->head ? (u_long)v->head->len : 0;
+                btw_unlock();
+            }
+            btw_timing_poll();   /* after the receive: what Steam had by now was offered */
             if (!argp)
                 return fail(WSAEFAULT);
             *argp = n;
@@ -384,7 +396,7 @@ int WSAAPI btw_hook_sendto(SOCKET s, const char *buf, int len, int flags,
             BTW_INC(tx_drop_noslot);
         } else if (slot == own) {
             /* to ourselves: a real stack loops this back to our own socket */
-            btw_vlan_deliver_locked(own, sport, dport, data, len);
+            btw_vlan_deliver_locked(own, sport, dport, data, len, 0);
             BTW_INC(tx_loop);
         } else {
             btw_peers_send_locked(slot, sport, dport, data, len);
@@ -422,6 +434,17 @@ int WSAAPI btw_hook_recvfrom(SOCKET s, char *buf, int len, int flags, struct soc
         btw_unlock();
         return fail(WSAEFAULT);
     }
+    if (!v->head) {
+        /* nothing queued: ask Steam directly (the game normally asks FIONREAD first) */
+        btw_unlock();
+        btw_session_rx_from_game();
+        btw_lock();
+        v = find_locked(s);
+        if (!v || !v->hooked) {
+            btw_unlock();
+            return fail(WSAEINTR);
+        }
+    }
     while (!v->head) {
         if (v->nonblocking) {
             btw_unlock();
@@ -453,6 +476,8 @@ int WSAAPI btw_hook_recvfrom(SOCKET s, char *buf, int len, int flags, struct soc
         *fromlen = sizeof *sin;
     }
     if (!(flags & MSG_PEEK)) {
+        if (g_timing)
+            btw_timing_read(d->t_pick, d->t_steam);
         /* UDP: a datagram is consumed even when it did not fit */
         v->head = d->next;
         if (!v->head)

@@ -55,6 +55,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
             btw_log("BTWSTEAM_DISABLE set: no hooks, no patch, no Steam (IChat calls are no-ops)");
             break;
         }
+        btw_timing_init();
         btw_vlan_init();
         btw_peers_init();
         btw_log("IAT: patched %d WS2_32 slot(s) in the main module", btw_iat_patch(1));

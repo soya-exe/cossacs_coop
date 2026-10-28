@@ -225,7 +225,8 @@ BTW_SFLAT_ASSERT(sizeof(SteamNetworkingMessage_t) == 208, "msg size");
     X(void,           SteamAPI_SteamNetworkingIdentity_SetSteamID64, (SteamNetworkingIdentity *self, uint64_t steamID)) \
     X(uint64_t,       SteamAPI_SteamNetworkingIdentity_GetSteamID64, (SteamNetworkingIdentity *self)) \
     X(ISteamNetworkingUtils *, SteamAPI_SteamNetworkingUtils_SteamAPI_v004, (void)) \
-    X(bool,           SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32, (ISteamNetworkingUtils *self, int eValue, int32_t val))
+    X(bool,           SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32, (ISteamNetworkingUtils *self, int eValue, int32_t val)) \
+    X(int64_t,        SteamAPI_ISteamNetworkingUtils_GetLocalTimestamp, (ISteamNetworkingUtils *self)) /* us, same clock as m_usecTimeReceived */
 
 /* function pointer types: PFN_<export name> */
 #define STEAM_FLAT_PFN_(r, n, p) typedef r (__cdecl *PFN_##n) p;

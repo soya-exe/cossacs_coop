@@ -171,3 +171,106 @@ Screenshots and logs: `~/btw-test/e2e-nick/`.
   `Ivan_Petrovich (7.20)` / `TAG_Olaf (7.20)` at game time 0:00:13 (`ingame-a.png`, `ingame-b.png`).
   ~2150 datagrams each way, all drop counters 0.
 - Hellos: `hello from ...02 (they say slot 2, table says 2)` and `... slot 1, table says 1`.
+
+## Latency (2026-10-28, btwsteam 0.1.2)
+
+Copies a (host, HostA) and b (joiner, JoinB) on one PC over the mock Steam, headless and
+silent, driven by `tools/net_latency.sh <label>`: menus, 8 x 2 screenshots of the room's status
+line, ready, start, a 90 s match. The hook and mock logged `BTWSTEAM_TIMING=1` percentiles every
+10 s; `tools/timing_summary.py` gives the median of the 10 s windows' p50 and p95 and the overall
+max, from 15 s after the start (the map load stalls the game for ~0.45 s). Logs, ping strips and
+screenshots: `~/btw-test/latency/<label>-*`. The other agent's copies c/d were running at the
+same time, so the process CPU figures carry about +-5 points of noise.
+
+Runs: `base` = 0.1.1 code + the instrumentation (worker-only receive, 10 ms poll);
+`after` = 0.1.2; `off` = 0.1.2 with `BTWSTEAM_GAME_THREAD_RX=0` (same as 0.1.1, used for the
+`rxwait` / `rxhook` split, which `base` did not have yet); `-lag40` = `BTWSTEAM_MOCK_LAG_MS=40`
+on both copies (80 ms round trip); `mut` = the mutation below.
+
+### Where the time goes (before)
+
+Per datagram, in a match, no lag (base, copy a / b):
+
+| Stage | p50 | p95 | max |
+|---|---|---|---|
+| hook send: game `sendto` -> `SendMessageToUser` (`tx`) | 20 us | 110 us | 1.7-2.9 ms |
+| mock delivery: send -> ready in the other process | 0.2 ms | 0.55 ms | 7-8 ms |
+| hook receive poll: Steam has it -> worker takes it (`rxpoll`) | 3.6 ms | 9.3 ms | 10.1 ms |
+| our queue -> game `recvfrom` (`rxgame`) | 5.9-6.5 ms | 9.7-11.2 ms | 18-19 ms |
+| total receive: Steam has it -> game `recvfrom` (`rxtotal`) | 8.8-9.5 ms | 17.6-17.9 ms | 25-27 ms |
+
+The game reads its socket once per frame: FIONREAD ~146 times/s, gaps of ~120 us inside a frame
+and ~18 ms between frames (p95), so about 55 frames/s. The `rxwait` / `rxhook` split (`off`)
+shows the receive time is mostly the wait for the game's next frame (`rxwait` p50 8-9.4 ms,
+p95 16.5 ms); the 10 ms worker poll adds a whole frame whenever a datagram arrived between the
+worker's poll and the game's frame: `rxhook` p95 17 ms in the room, 50 us to 8 ms in the match.
+The send side is already immediate (the worker is woken by an event).
+
+### What changed
+
+The game thread now fetches game data from Steam itself when it polls an empty queue
+(`btw_session_rx_from_game`, called from the hooked FIONREAD and recvfrom). Thread-safety: every
+`ISteamNetworkingMessages` call takes GameNetworkingSockets' global lock
+(`SteamNetworkingGlobalLock` in `csteamnetworkingmessages.cpp`); our receive lock serialises it
+with the worker so datagrams keep Steam's order; the game thread only `TryEnter`s, at most every
+500 us; callbacks stay on the worker. Sends, the 10 ms worker loop and every Steam config value
+are unchanged (see `src/hook/README.md`, "Performance"). The mock got `GetLocalTimestamp`,
+arrival-time `m_usecTimeReceived`, `delivery:` stats and on-time release of lagged packets.
+
+### Before / after
+
+Room ping = the room's "max ping" (16 samples, both copies). Receive = Steam has it -> game
+`recvfrom`; hook-added = `rxhook` (first game poll after arrival -> `recvfrom`), in the match.
+
+| | base | off (0.1.2, fix off) | after | base-lag40 | after-lag40 |
+|---|---|---|---|---|---|
+| room max ping | 28-30 ms | 27-30 ms | **17-19 ms** | 104-106 ms | **93-97 ms** |
+| room receive p50 / p95 (a) | - | 14.1 / 23.1 ms | 6.3 / 16.6 ms | - | - |
+| room hook-added p95 (a / b) | - | 17.6 / 17.1 ms | 0.02 / 0.06 ms | - | - |
+| match receive p50 (a / b) | 9.5 / 8.8 ms | 10.6 / 9.0 ms | 7.4 / 9.7 ms | 13.5 / 12.8 ms | 7.6 / 7.8 ms |
+| match receive p95 (a / b) | 17.6 / 17.9 ms | 18.5 / 19.2 ms | 16.2 / 16.1 ms | 23.5 / 22.9 ms | 15.3 / 16.1 ms |
+| match receive max (a / b) | 27 / 25 ms | 27 / 28 ms | 25 / 24 ms | 30 / 27 ms | 28 / 26 ms |
+| match hook-added p50 / p95 / max (a) | - | 0.01 / 0.05 / 21 ms | 0.01 / 0.02 / 18 ms | - | 0.01 / 0.01 / 19 ms |
+| match hook-added p95 (b) | - | 7.9 ms | 0.02 ms | - | 0.01 ms |
+| hook send p50 / p95 | 20 / 110 us | 30 / 165 us | 30 / 140 us | 40 / 80 us | 40 / 80 us |
+| mock delivery p50 / p95 | 0.2 / 0.55 ms | 0.25 / 0.83 ms | 0.24 / 0.65 ms | 40.7 / 41.4 ms | 40.7 / 41.6 ms |
+| game-thread receive, per call p50 / p95 / max | - | - | 10-20 / 160 us / 1.8 ms | - | 10 / 20 us / 0.7 ms |
+| game-thread receive, total | - | - | ~2 ms/s (58 calls/s) | - | ~0.35 ms/s |
+| worker thread CPU (/proc) | 0.6 % | 0.7 % | 0.7 % | 0.4 % | 0.4 % |
+| dmcr.exe CPU (/proc, one core) | 21.5 % | 22 % | 23-24 % | 40-47 % | 36-50 % |
+
+Hook-only versus mock: the mock's own share is the "mock delivery" row (0.2-0.3 ms at p50 with
+no lag, unchanged). The gain is in the hook-added row and in the room ping; everything left of the
+receive time is the game's own frame wait (`rxwait`, p50 7.3-9.7 ms, p95 15-17 ms in every run).
+With lag the game sends only ~8 datagrams/s and polls ~70 times/s (one frame per ~16.5 ms, no
+burst), so a datagram the worker would have taken late now waits for nothing but the frame:
+receive p50 13 -> 8 ms. CPU: the worker still wakes every 10 ms (no busy loop, no
+`timeBeginPeriod`); dmcr.exe is the game's own render loop (it uses more with lag in both builds).
+
+### Mutation check
+
+`btw_session_rx_from_game` made to return at once (`MUTATION` line in `src/hook/session.c`),
+rebuilt, run `mut` (60 s match): the room ping went back to **28-30 ms**, `rxhook` p95 back to
+**17.1 / 17.3 ms** in the room and 16.4 ms in the match (copy a), no `gtcall` samples. Restored
+from a copy, `grep -r MUTATION src/` finds nothing, rebuilt.
+
+### Full match and leave (0.1.2)
+
+`MATCH_SECS=130 KILL_JOINER=1 tools/net_latency.sh final` (run 06:44-06:48; an earlier identical
+run at 03:53 is in `~/btw-test/latency/final-run1/` with the same outcome):
+
+- Room max ping 17-20 ms. The match ran 2:11 of wall time; both copies showed game time
+  **0:02:09 [149]** at the end (`final-a-game.png`, `final-b-game.png`), no pause or desync.
+- Counters at the end of the match, every drop counter 0: b `tx uni 7962 | rx 7963 reads 7963 |
+  rx drop ... all 0`; a `rx 7973 reads 7973`, and its `noslot 419` are the game's sends to
+  10.77.0.2 after b was killed (expected).
+- Match timing: receive p50 7.9 / 9.4 ms, p95 16.1 / 16.2 ms; hook-added (`rxhook`) p50 10 us,
+  p95 20 us on both; send p50 20-25 us; game-thread receives 59/s at p50 10 us (~2 ms/s);
+  worker 0.6-0.8 % of a core, dmcr.exe 24-26 %.
+- `tools/stop_instance.sh b` mid-game: a shows the game's own **PAUSE "HostA: Ready / JoinB: Not
+  responding."** at +6 s and +15 s, "Press F3 to disconnect from the game." at +40 s; the game
+  then dropped JoinB itself (`SendVictoryState` at +42 s, JoinB struck through in the player
+  list) and a played on alone (game time 0:03:07 at +55 s). The mock lobby dropped b after 5 s
+  (506 flag 0x4). The hook adds nothing to this, as before.
+- Every copy started through `tools/run_instance.sh` with `BTW_AUDIO=off`; no "AUDIO GUARD" line
+  in either run.log.

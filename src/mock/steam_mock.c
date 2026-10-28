@@ -42,14 +42,15 @@ typedef struct {
     uint16_t frag_cnt;
     uint16_t pad;
     uint32_t total_len;
+    int64_t  t_send_us;    /* sender's qpc_us() at send (one PC: same clock), for delivery stats */
 } wire_hdr;
 #pragma pack(pop)
 
 /* ---- state ------------------------------------------------------------------------------ */
 typedef struct cbnode { struct cbnode *next; int id; void *data; int size; } cbnode;
 typedef struct resnode { struct resnode *next; SteamAPICall_t call; int id; void *data; int size; } resnode;
-typedef struct msgnode { struct msgnode *next; uint64_t from; int channel; int flags; char *data; int size; } msgnode;
-typedef struct pktnode { struct pktnode *next; ULONGLONG due; int len; char data[]; } pktnode;
+typedef struct msgnode { struct msgnode *next; uint64_t from; int channel; int flags; char *data; int size; int64_t t_us; } msgnode;
+typedef struct pktnode { struct pktnode *next; int64_t due_us; int len; char data[]; } pktnode;
 
 typedef struct {
     uint64_t id;
@@ -105,6 +106,21 @@ static struct { int tag; } g_user = {1}, g_mm = {2}, g_friends = {3}, g_netmsg =
 static void lock(void)   { EnterCriticalSection(&g_lock); }
 static void unlock(void) { LeaveCriticalSection(&g_lock); }
 static ULONGLONG now_ms(void) { return GetTickCount64(); }
+/* Microsecond clock: m_usecTimeReceived and GetLocalTimestamp (QueryPerformanceCounter). */
+static int64_t qpc_us(void)
+{
+    static LARGE_INTEGER f;
+    LARGE_INTEGER c;
+    if (!f.QuadPart) QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    return c.QuadPart / f.QuadPart * 1000000 + c.QuadPart % f.QuadPart * 1000000 / f.QuadPart;
+}
+
+/* Delivery of W_MSG packets: sender's send_raw -> message ready in this process (includes
+ * BTWSTEAM_MOCK_LAG_MS), logged every 10 s as "delivery:". Lock held. */
+#define DSAMPLES 8192
+static int32_t g_dsamp[DSAMPLES]; static int g_dn; static ULONGLONG g_dlast;
+static int cmp_i32(const void *a, const void *b) { int32_t x = *(const int32_t *)a, y = *(const int32_t *)b; return x < y ? -1 : x > y; }
 static uint64_t self_sid(void) { return ID_BASE + g_id; }
 static unsigned sid_to_mock(uint64_t sid) { return (sid > ID_BASE && sid - ID_BASE <= MAX_MOCK_ID) ? (unsigned)(sid - ID_BASE) : 0; }
 static unsigned lobby_to_mock(uint64_t l) { return (l > LOBBY_BASE && l - LOBBY_BASE <= MAX_MOCK_ID) ? (unsigned)(l - LOBBY_BASE) : 0; }
@@ -202,6 +218,7 @@ static int send_raw(unsigned to, int type, int flags, int channel, uint32_t seq,
     memset(&h, 0, sizeof h);
     h.magic = WIRE_MAGIC; h.type = (uint8_t)type; h.flags = (uint8_t)flags; h.frag_idx = (uint16_t)fidx;
     h.from_id = g_id; h.channel = channel; h.seq = seq; h.frag_cnt = (uint16_t)fcnt; h.total_len = total;
+    h.t_send_us = qpc_us();
     memcpy(g_sendbuf, &h, sizeof h);
     if (len) memcpy(g_sendbuf + sizeof h, payload, len);
     memset(&a, 0, sizeof a);
@@ -325,10 +342,15 @@ static peer_t *peer_get(uint64_t sid, int create)
 }
 static void msg_append(msgnode **h, msgnode **t, msgnode *m) { m->next = NULL; if (*t) (*t)->next = m; else *h = m; *t = m; }
 
-static void msg_complete(peer_t *p, int channel, int flags, char *data, int size)
+static void msg_complete(peer_t *p, int channel, int flags, char *data, int size, int64_t t_send)
 {
     msgnode *m = calloc(1, sizeof *m);
     m->from = p->id; m->channel = channel; m->flags = flags; m->data = data; m->size = size;
+    m->t_us = qpc_us();   /* "received by Steam": what m_usecTimeReceived reports */
+    if (t_send && g_dn < DSAMPLES) {
+        int64_t d = m->t_us - t_send;
+        g_dsamp[g_dn++] = d < 0 ? 0 : d > 0x7fffffff ? 0x7fffffff : (int32_t)d;
+    }
     g_recv++;
     if (p->accepted) { msg_append(&g_ready_head, &g_ready_tail, m); return; }
     msg_append(&g_held_head, &g_held_tail, m);
@@ -348,7 +370,7 @@ static void on_msg(const wire_hdr *h, const char *pl, int len)
     if (h->frag_cnt <= 1) {
         char *d = malloc(len > 0 ? len : 1);
         memcpy(d, pl, len);
-        msg_complete(p, h->channel, h->flags, d, len);
+        msg_complete(p, h->channel, h->flags, d, len, h->t_send_us);
         return;
     }
     if (h->total_len > k_cbMaxSteamNetworkingSocketsMessageSizeSend) return;
@@ -367,7 +389,7 @@ static void on_msg(const wire_hdr *h, const char *pl, int len)
     p->r_next++;
     if (p->r_next == p->r_cnt) {
         char *d = p->r_buf; p->r_buf = NULL;
-        msg_complete(p, p->r_channel, p->r_flags, d, (int)p->r_total);
+        msg_complete(p, p->r_channel, p->r_flags, d, (int)p->r_total, h->t_send_us);
     }
 }
 
@@ -511,6 +533,15 @@ static void tick(void)
         push_cb(k_iGameLobbyJoinRequested, &j, sizeof j);
         g_invite_at = 0;
     }
+    if (t - g_dlast >= 10000) {
+        g_dlast = t;
+        if (g_dn) {
+            qsort(g_dsamp, g_dn, sizeof g_dsamp[0], cmp_i32);
+            LOG("delivery: n=%d p50=%d p95=%d max=%d us (send -> ready, lag %d ms included)", g_dn,
+                (int)g_dsamp[(g_dn - 1) / 2], (int)g_dsamp[(g_dn * 95 + 99) / 100 - 1], (int)g_dsamp[g_dn - 1], g_lag_ms);
+            g_dn = 0;
+        }
+    }
     if (g_join_pending && t - g_join_start > (ULONGLONG)g_timeout_ms) {
         LOG("join of %llu timed out", (unsigned long long)g_join_lobby);
         g_join_pending = 0;
@@ -552,9 +583,19 @@ static void tick(void)
 static DWORD WINAPI backend_thread(LPVOID arg)
 {
     static char buf[70000];
+    typedef HRESULT (WINAPI *set_desc_t)(HANDLE, const WCHAR *);
+    set_desc_t name = (set_desc_t)(void (*)(void))GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetThreadDescription");
     (void)arg;
+    if (name) name(GetCurrentThread(), L"steam-mock");   /* else it inherits the caller's name */
     while (g_running) {
+        /* wake for the next packet, the next lagged packet that falls due, or tick() (5 ms) */
         fd_set rs; struct timeval tv = {0, 5000};
+        lock();
+        if (g_pkt_head) {
+            int64_t wait = g_pkt_head->due_us - qpc_us();
+            if (wait < 5000) tv.tv_usec = wait > 0 ? (long)wait : 0;
+        }
+        unlock();
         FD_ZERO(&rs); FD_SET(g_sock, &rs);
         select(0, &rs, NULL, NULL, &tv);
         for (;;) {
@@ -566,14 +607,14 @@ static DWORD WINAPI backend_thread(LPVOID arg)
                 break;
             }
             p = malloc(sizeof *p + n);
-            p->next = NULL; p->due = now_ms() + (ULONGLONG)g_lag_ms; p->len = n; memcpy(p->data, buf, n);
+            p->next = NULL; p->due_us = qpc_us() + (int64_t)g_lag_ms * 1000; p->len = n; memcpy(p->data, buf, n);
             lock();
             if (g_pkt_tail) g_pkt_tail->next = p; else g_pkt_head = p;
             g_pkt_tail = p;
             unlock();
         }
         lock();
-        while (g_pkt_head && g_pkt_head->due <= now_ms()) {
+        while (g_pkt_head && g_pkt_head->due_us <= qpc_us()) {
             pktnode *p = g_pkt_head;
             g_pkt_head = p->next; if (!g_pkt_head) g_pkt_tail = NULL;
             handle_packet(p->data, p->len);
@@ -989,13 +1030,11 @@ int __cdecl SteamAPI_ISteamNetworkingMessages_ReceiveMessagesOnChannel(ISteamNet
         if (n < max && m->channel == ch) {
             SteamNetworkingMessage_t *o = calloc(1, sizeof *o);
             peer_t *p = peer_get(m->from, 1);
-            LARGE_INTEGER q, f;
             *pp = m->next;
             o->m_pData = m->data; o->m_cbSize = m->size;
             o->m_conn = p ? (uint32_t)(p - g_peers) + 1 : 0;
             ident_set(&o->m_identityPeer, m->from);
-            QueryPerformanceCounter(&q); QueryPerformanceFrequency(&f);
-            o->m_usecTimeReceived = (int64_t)((double)q.QuadPart * 1e6 / (double)f.QuadPart);
+            o->m_usecTimeReceived = m->t_us;
             o->m_nMessageNumber = p ? ++p->msgnum : 0;
             o->m_pfnFreeData = free_msg_data; o->m_pfnRelease = release_msg;
             o->m_nChannel = ch; o->m_nFlags = m->flags;
@@ -1072,6 +1111,11 @@ uint64_t __cdecl SteamAPI_SteamNetworkingIdentity_GetSteamID64(SteamNetworkingId
 ISteamNetworkingUtils * __cdecl SteamAPI_SteamNetworkingUtils_SteamAPI_v004(void)
 {
     return g_inited ? (ISteamNetworkingUtils *)&g_netutils : NULL;
+}
+int64_t __cdecl SteamAPI_ISteamNetworkingUtils_GetLocalTimestamp(ISteamNetworkingUtils *self)
+{
+    check_self(self, &g_netutils, "GetLocalTimestamp");
+    return qpc_us();
 }
 bool __cdecl SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32(ISteamNetworkingUtils *self, int e, int32_t v)
 {

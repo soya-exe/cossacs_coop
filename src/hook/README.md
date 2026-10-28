@@ -53,7 +53,8 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
 5. **Steam** (`steam_api.c`, `session.c`, `peers.c`). A worker thread loads `steam_api.dll`
    from the exe folder: flat API only, through `GetProcAddress`, and never from DllMain. It
    writes `steam_appid.txt` (4850) if the file is missing. Manual callback dispatch runs every
-   10 ms, or at once when the game sends.
+   10 ms, or at once when the game sends. Game data is also received on the game thread (see
+   "Threads" and "Performance").
    - After init it reads the persona name (`ISteamFriends::GetPersonaName`, optional export)
      for the nick.
    - With no join target, it creates a friends-only lobby for 7 players. It sets lobby data
@@ -77,8 +78,15 @@ The game's netcode does not change. Background: `../../re/FINDINGS.md`, `../../D
    - The message sender is read at offset 12 of `SteamNetworkingMessage_t` (real 32-bit DLL),
      with 16 as the fallback. The log says which one was found.
 
-Threads: every call into `steam_api.dll` happens on the worker thread. The game thread only
-touches our queues and tables, under one critical section.
+Threads: callbacks (manual dispatch), lobby calls and sends happen on the worker thread. The
+one exception is receiving game data: when the game polls its socket (`ioctlsocket(FIONREAD)`
+or `recvfrom`) and our queue for it is empty, the game thread calls
+`ISteamNetworkingMessages::ReceiveMessagesOnChannel(0)` itself. That call is thread-safe
+(GameNetworkingSockets takes its global lock in every ISteamNetworkingMessages call); a
+receive lock serialises it with the worker's receive so datagrams reach the game in the
+order Steam returned them, and the game thread only `TryEnter`s it, so it never waits for
+the worker. It runs at most once per 500 us and not after Steam shut down. Otherwise the
+game thread only touches our queues and tables, under one critical section.
 
 ## Build
 
@@ -104,6 +112,8 @@ Multiplayer -> Deathmatch -> **GSC-Game.Net Internet Game** (4th button).
 | `BTWSTEAM_NOPATCH=1` | do not patch the GSC-GAME.NET login |
 | `BTWSTEAM_DISABLE=1` | no hooks, no patch, no Steam |
 | `BTWSTEAM_DEBUG=1` | log every datagram |
+| `BTWSTEAM_TIMING=1` | log latency percentiles every 10 s (`timing:` lines, see "Performance") |
+| `BTWSTEAM_GAME_THREAD_RX=0` | receive only on the worker (every 10 ms), as before 0.1.2 |
 
 ## Log
 
@@ -118,3 +128,39 @@ line is `HH:MM:SS.mmm [thread id] message` and goes straight to disk. It records
   changes;
 - Steam errors;
 - a `stats:` line of counters every 10 s.
+
+## Performance (latency)
+
+Where the time goes, from `BTWSTEAM_TIMING=1` (two copies on one PC over the mock Steam,
+numbers in `tools/E2E-RESULTS.md`, "Latency"):
+
+- **Send** (`tx`: game `sendto` -> `SendMessageToUser`): p50 30 us, p95 ~130 us. The game
+  thread queues the datagram and wakes the worker with an event. Sending directly from the
+  game thread would save these ~30 us but would put Steam's send (and its global lock) inside
+  the game's frame, so sends stay on the worker. `NoNagle` is set on every data message, so
+  `k_ESteamNetworkingConfig_NagleTime` (12) does not apply; the send rate configs
+  (`SendRateMin` 10, `SendRateMax` 11) do not matter at ~2.5 KB/s. No config value is changed
+  besides the 4 MB send/receive buffers (9, 47): the mock cannot measure Steam's own configs,
+  and none of them is a latency knob for this traffic.
+- **Receive, hook** (`rxpoll`: Steam got it -> we took it out of Steam; `rxhook`: the game's
+  first poll after Steam got it -> the `recvfrom` that delivered it). Before 0.1.2 only the
+  worker received, every 10 ms, so a datagram that came in just before the game's poll waited
+  for the game's next frame. Since 0.1.2 the game thread fetches from Steam whenever it polls
+  an empty queue: `rxhook` is 10 us at p50 and 20 us at p95; the room's ping on one PC went
+  from 28-30 ms to 17-19 ms.
+- **Receive, game** (`rxwait`: Steam got it -> the game's next poll): the game reads its
+  socket once per frame (`gap` p95 ~18 ms at ~55 fps here), so a datagram waits 0-18 ms (p50
+  ~8 ms) for the next frame. This is the game's own loop and the biggest remaining share;
+  only a change in the game (polling the socket more often than once per frame) could cut it.
+- **Cost:** the worker still wakes every 10 ms (about 0.7 % of one core, unchanged); the
+  game-thread receives take ~2 ms per second in total (p50 10-20 us per call).
+
+`timing:` line fields: `tx`, `txcall` (duration of `SendMessageToUser`), `rxpoll`, `rxgame`
+(our queue -> the game's `recvfrom`), `rxtotal` (Steam -> `recvfrom`), `rxwait`, `rxhook`,
+`gap` (between two FIONREAD polls of the game), `gtcall` (one game-thread receive), each as
+`n p50 p95 max` in microseconds, then the game's poll rate, the game-thread receive count and
+time, and the CPU of the worker thread and the process. `rxpoll` needs
+`ISteamNetworkingUtils::GetLocalTimestamp` (optional export) to compare with
+`SteamNetworkingMessage_t::m_usecTimeReceived` (offset 160 in the 32-bit struct).
+`tools/net_latency.sh` runs a two-copy room + match and summarises these lines with
+`tools/timing_summary.py`.

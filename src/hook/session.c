@@ -1,12 +1,15 @@
 /*
  * The Steam worker thread (DESIGN.md "Steam session").
  *
- * Every call into steam_api.dll happens on this thread. Every 10 ms (or right away
- * when the game queues a datagram) it:
+ * Calls into steam_api.dll happen on this thread, except one: receiving game data, which
+ * the game thread also does when it polls an empty socket (btw_session_rx_from_game). Every
+ * 10 ms (or right away when the game queues a datagram) the worker:
  *   1. runs manual callback dispatch (lobby events, invites, session requests),
  *   2. drains channel 0 (game data) and channel 1 (control) into peers.c,
  *   3. sends keep-alives / drops silent peers (peers.c),
  *   4. sends everything the game queued.
+ * Sends stay here: the game's sendto only queues and wakes the worker, which costs ~30 us
+ * (BTWSTEAM_TIMING "tx"), and a slow Steam send can never stall the game's frame.
  *
  * Lobby: whoever creates it is the host. The host gives each member a slot in lobby
  * data (`slot_<steamid64>` = N, the host prefers 1; existing slots never move) and
@@ -541,28 +544,94 @@ static uint64_t msg_sender(const uint8_t *m)
     return off == 12 ? a : b;
 }
 
+/* SteamNetworkingMessage_t::m_usecTimeReceived (32-bit layout, see src/mock/steam_flat.h) */
+#define MSG_OFS_TIME_RECEIVED 160
+
+/* Receiving runs on two threads: the worker (every 10 ms, both channels) and the game thread
+ * (channel 0, from the FIONREAD / recvfrom hooks when the game finds its queue empty; see
+ * btw_session_rx_from_game). g_rx_cs serialises them, so datagrams reach the game's queue in
+ * the order Steam returned them (per-peer order kept). ISteamNetworkingMessages may be called
+ * from any thread: GameNetworkingSockets takes its global lock in every
+ * ReceiveMessagesOnChannel / SendMessageToUser. Callbacks stay on the worker (dispatch()).
+ * g_live: Steam is initialised and not shut down; read by the game thread under g_rx_cs. */
+static CRITICAL_SECTION g_rx_cs;
+static volatile LONG g_live;
+static int64_t g_gt_last_us;    /* game thread: last drain (rate limit) */
+static int g_gt_drain = 1;      /* BTWSTEAM_GAME_THREAD_RX=0 turns the game-thread drain off */
+
+/* Caller holds g_rx_cs. Returns the number of messages. */
+static int receive_channel(int ch)
+{
+    int total = 0;
+    void *msgs[64];
+    int n;
+    do {
+        n = S.NM_ReceiveMessagesOnChannel(g_nm, ch, msgs, 64);
+        /* BTWSTEAM_TIMING: how long Steam held them before we asked (both clocks read now) */
+        int64_t t_pick = 0, steam_now = 0;
+        if (g_timing && n > 0 && ch == BTW_CH_DATA && g_nu && S.NU_GetLocalTimestamp) {
+            steam_now = S.NU_GetLocalTimestamp(g_nu);
+            t_pick = btw_now_us();
+        }
+        for (int i = 0; i < n; i++) {
+            const uint8_t *m = msgs[i];
+            const uint8_t *data;
+            int32_t size;
+            memcpy(&data, m, sizeof data);
+            memcpy(&size, m + 4, sizeof size);
+            uint64_t from = msg_sender(m);
+            int64_t t_steam = 0;
+            if (t_pick) {
+                int64_t recvd;
+                memcpy(&recvd, m + MSG_OFS_TIME_RECEIVED, sizeof recvd);
+                int64_t age = steam_now - recvd;
+                if (recvd > 0 && age >= 0 && age < 10000000) {
+                    btw_timing_add(BTW_T_RXPOLL, age);
+                    t_steam = t_pick - age;
+                }
+            }
+            if (from && data && size >= 0)
+                btw_peers_on_message(from, ch, data, size, t_steam);
+            else
+                BTW_INC(rx_drop_bad);
+            S.Msg_Release(msgs[i]);
+        }
+        total += n;
+    } while (n == 64);
+    return total;
+}
+
 static void receive(void)
 {
-    for (int ch = BTW_CH_DATA; ch <= BTW_CH_CTRL; ch++) {
-        void *msgs[64];
-        int n;
-        do {
-            n = S.NM_ReceiveMessagesOnChannel(g_nm, ch, msgs, 64);
-            for (int i = 0; i < n; i++) {
-                const uint8_t *m = msgs[i];
-                const uint8_t *data;
-                int32_t size;
-                memcpy(&data, m, sizeof data);
-                memcpy(&size, m + 4, sizeof size);
-                uint64_t from = msg_sender(m);
-                if (from && data && size >= 0)
-                    btw_peers_on_message(from, ch, data, size);
-                else
-                    BTW_INC(rx_drop_bad);
-                S.Msg_Release(msgs[i]);
-            }
-        } while (n == 64);
+    EnterCriticalSection(&g_rx_cs);
+    receive_channel(BTW_CH_DATA);
+    receive_channel(BTW_CH_CTRL);
+    LeaveCriticalSection(&g_rx_cs);
+}
+
+/* Game thread, hooked socket, its queue is empty: fetch game data from Steam right now instead
+ * of waiting for the worker's next 10 ms round. Never blocks: if the worker is receiving at
+ * this moment it is about to deliver anyway. At most once per 500 us, so a game loop that
+ * spins on FIONREAD does not spin on Steam. */
+void btw_session_rx_from_game(void)
+{
+    if (!g_live || !g_gt_drain)
+        return;
+    int64_t now = btw_now_us();
+    if (now - g_gt_last_us < 500)
+        return;
+    g_gt_last_us = now;
+    if (!TryEnterCriticalSection(&g_rx_cs))
+        return;
+    if (g_live) {
+        int n = receive_channel(BTW_CH_DATA);
+        if (g_timing) {
+            int64_t us = btw_now_us() - now;
+            btw_timing_add(BTW_T_GTCALL, us);
+            btw_timing_gt_call(us, n > 0);
+        }
     }
+    LeaveCriticalSection(&g_rx_cs);
 }
 
 static void flush_out(void)
@@ -578,7 +647,12 @@ static void flush_out(void)
         } else {
             int flags = SEND_NO_NAGLE | SEND_AUTO_RESTART_BROKEN_SESSION |
                         (m->channel == BTW_CH_CTRL ? SEND_RELIABLE : SEND_UNRELIABLE);
+            int64_t t0 = m->t_us ? btw_now_us() : 0;
             int r = S.NM_SendMessageToUser(g_nm, &to, m->data, (uint32_t)m->len, flags, m->channel);
+            if (t0) {
+                btw_timing_add(BTW_T_TX, t0 - m->t_us);
+                btw_timing_add(BTW_T_TXCALL, btw_now_us() - t0);
+            }
             if (r != ERESULT_OK) {
                 BTW_INC(tx_steam_err);
                 if (nerr_logged < 20 || (g_ctr.tx_steam_err % 1000) == 0) {
@@ -734,12 +808,31 @@ void btw_session_request_host_ready(void)
     SetEvent(g_wake_event);
 }
 
+/* Names the thread "btwsteam-worker" (Windows 10+ debuggers; Wine passes it on to Linux, so
+ * /proc/<pid>/task/<tid>/comm finds it for CPU measurements). Optional export. */
+static void name_thread(void)
+{
+    typedef HRESULT (WINAPI *set_desc_t)(HANDLE, const WCHAR *);
+    set_desc_t f = (set_desc_t)(void (*)(void))GetProcAddress(GetModuleHandleA("kernel32.dll"),
+                                                             "SetThreadDescription");
+    if (f)
+        f(GetCurrentThread(), L"btwsteam-worker");
+}
+
 static DWORD WINAPI worker(LPVOID arg)
 {
     (void)arg;
+    name_thread();
     btw_log("worker: started");
     log_ccuid();
     g_steam_ok = steam_start();
+    char gtrx[8];
+    g_gt_drain = strcmp(btw_env("BTWSTEAM_GAME_THREAD_RX", gtrx, sizeof gtrx), "0") != 0;
+    if (g_steam_ok) {
+        InterlockedExchange(&g_live, 1);   /* g_nm, g_nu and S.* are set by now */
+        btw_log("worker: game data is also received on the game thread when its queue runs dry%s",
+                g_gt_drain ? "" : " -- OFF (BTWSTEAM_GAME_THREAD_RX=0)");
+    }
     btw_lock();
     g_state.steam_state = g_steam_ok ? 1 : -1;
     btw_unlock();
@@ -778,10 +871,14 @@ static DWORD WINAPI worker(LPVOID arg)
         if (now - last_stats >= 10000) {
             last_stats = now;
             btw_counters_dump();
+            btw_timing_dump();
         }
     }
     if (g_steam_ok) {
         leave_lobby();
+        EnterCriticalSection(&g_rx_cs);    /* no game-thread receive past this point */
+        InterlockedExchange(&g_live, 0);
+        LeaveCriticalSection(&g_rx_cs);
         S.Shutdown();
     }
     btw_log("worker: stopped");
@@ -790,6 +887,7 @@ static DWORD WINAPI worker(LPVOID arg)
 
 void btw_session_start(void)
 {
+    InitializeCriticalSection(&g_rx_cs);
     g_thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
     if (!g_thread) {
         btw_log("worker: CreateThread failed (error %lu): no Steam", (unsigned long)GetLastError());

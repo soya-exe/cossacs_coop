@@ -13,11 +13,15 @@
  *   steam_api.c  dynamic loading of steam_api.dll (flat API only)
  *   nick.c       player name sanitizer (UTF-8 Steam name -> ASCII nick; no Windows code)
  *   session.c    Steam worker thread: init, lobby, callbacks, send/receive pump
+ *   timing.c     optional latency percentiles (BTWSTEAM_TIMING=1)
  *
  * Threads: the game calls the hooks on its own thread(s); everything that talks to
- * steam_api.dll runs on the single worker thread in session.c. The two sides meet
- * in peers.c / vlan.c under one global lock (btw_lock), which is never held while
- * calling into Steam.
+ * steam_api.dll runs on the single worker thread in session.c, with one exception: when
+ * the game polls its socket (FIONREAD / recvfrom) and nothing is queued, the game thread
+ * itself calls ISteamNetworkingMessages::ReceiveMessagesOnChannel for game data (thread-safe
+ * in Steam; serialised with the worker by a receive lock, see session.c). Callbacks and
+ * sends stay on the worker. The two sides meet in peers.c / vlan.c under one global lock
+ * (btw_lock), which is never held while calling into Steam.
  */
 #ifndef BTWSTEAM_H
 #define BTWSTEAM_H
@@ -34,7 +38,7 @@
 
 /* Release version. Also embedded as the string "btwsteam-version:<version>" (log.c), which
  * the installers (installer/) look for to tell our ichat.dll from the game's. */
-#define BTWSTEAM_VERSION  "0.1.1"
+#define BTWSTEAM_VERSION  "0.1.2"
 
 /* ---- virtual LAN constants (DESIGN.md "Virtual addressing") ---- */
 #define BTW_GAME_PORT     34000          /* sockets bound to this port are hooked */
@@ -93,6 +97,19 @@ extern btw_counters_t g_ctr;
 #define BTW_ADD(f, n)   InterlockedExchangeAdd(&g_ctr.f, (LONG)(n))
 void btw_counters_dump(void);
 
+/* ---- timing.c (BTWSTEAM_TIMING=1) ---- */
+enum { BTW_T_TX, BTW_T_TXCALL, BTW_T_RXPOLL, BTW_T_RXGAME, BTW_T_RXTOTAL, BTW_T_RXWAIT,
+       BTW_T_RXHOOK, BTW_T_GAP, BTW_T_GTCALL, BTW_T_N };
+extern int g_timing;                     /* BTWSTEAM_TIMING set */
+void    btw_timing_init(void);           /* DllMain */
+int64_t btw_now_us(void);                /* QueryPerformanceCounter in microseconds */
+void    btw_timing_add(int metric, int64_t us);
+void    btw_timing_poll(void);           /* game: FIONREAD on the hooked socket */
+/* game: recvfrom consumed a datagram that Steam received at t_steam (btw_now_us clock) */
+void    btw_timing_read(int64_t t_pick, int64_t t_steam);
+void    btw_timing_gt_call(int64_t us, int got); /* a Steam call made on the game thread */
+void    btw_timing_dump(void);           /* worker, every 10 s */
+
 /* ---- iat.c ---- */
 /* Real WS2_32 functions (whatever the IAT held before we patched it). */
 typedef struct {
@@ -125,8 +142,9 @@ int    WSAAPI btw_hook_gethostname(char *, int);
 
 void btw_vlan_init(void);
 /* Queue a datagram for the hooked socket bound to dst_port. Caller holds btw_lock. */
+/* t_steam_us: when Steam received it (btw_now_us clock, 0 = unknown), for BTWSTEAM_TIMING. */
 void btw_vlan_deliver_locked(int from_slot, uint16_t src_port, uint16_t dst_port,
-                             const uint8_t *data, int len);
+                             const uint8_t *data, int len, int64_t t_steam_us);
 
 /* ---- peers.c ---- */
 typedef struct btw_out {
@@ -134,6 +152,7 @@ typedef struct btw_out {
     uint64_t to;          /* SteamID64 */
     int      channel;     /* BTW_CH_DATA / BTW_CH_CTRL, or -1 = close session */
     int      len;
+    int64_t  t_us;        /* btw_now_us() when queued (BTWSTEAM_TIMING), else 0 */
     uint8_t  data[];
 } btw_out_t;
 
@@ -152,8 +171,9 @@ void     btw_peers_steam_failed(void);        /* stop waiting for a slot */
  * of peers it was queued for (for logging only). Caller holds btw_lock. */
 int      btw_peers_send_locked(int dst_slot, uint16_t src_port, uint16_t dst_port,
                                const uint8_t *data, int len);
-/* Worker thread: a message arrived from Steam. */
-void     btw_peers_on_message(uint64_t from, int channel, const uint8_t *data, int len);
+/* A message arrived from Steam (t_steam_us: when Steam got it, 0 = unknown). */
+void     btw_peers_on_message(uint64_t from, int channel, const uint8_t *data, int len,
+                              int64_t t_steam_us);
 /* Worker thread, every ~10 ms: keep-alives and timeouts. */
 void     btw_peers_tick(DWORD now);
 /* Worker thread: take the whole outbound queue (FIFO order). */
@@ -210,6 +230,7 @@ typedef struct {
     uint64_t (__cdecl *Ident_GetSteamID64)(const void *self);
     void    *(__cdecl *SteamNetworkingUtils)(void);
     bool     (__cdecl *NU_SetGlobalConfigValueInt32)(void *self, int key, int32_t val);
+    int64_t  (__cdecl *NU_GetLocalTimestamp)(void *self);  /* optional, BTWSTEAM_TIMING only */
 } btw_sapi_t;
 extern btw_sapi_t S;
 /* Loads <dir>steam_api.dll and resolves the flat exports. 0 on success. */
@@ -221,6 +242,9 @@ void btw_patch_login(void);     /* from DllMain: unlock the GSC-GAME.NET connect
 /* ---- session.c ---- */
 void btw_session_start(void);   /* from DllMain: only creates the worker thread */
 void btw_session_stop(void);    /* asks the worker to leave the lobby and exit */
+/* Game thread (FIONREAD / recvfrom on the hooked socket found nothing queued): receive game
+ * data from Steam now. Non-blocking, rate-limited; a no-op without Steam. */
+void btw_session_rx_from_game(void);
 
 /* Lobby state for the game thread (ichat.c), a copy taken under btw_lock. */
 typedef struct {

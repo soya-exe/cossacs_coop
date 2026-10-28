@@ -58,6 +58,7 @@ static const sym_t k_syms[] = {
     R(Ident_GetSteamID64,          "SteamAPI_SteamNetworkingIdentity_GetSteamID64"),
     O(SteamNetworkingUtils,        "SteamAPI_SteamNetworkingUtils_SteamAPI_v004"),
     O(NU_SetGlobalConfigValueInt32, "SteamAPI_ISteamNetworkingUtils_SetGlobalConfigValueInt32"),
+    O(NU_GetLocalTimestamp,        "SteamAPI_ISteamNetworkingUtils_GetLocalTimestamp"),
 };
 #undef R
 #undef O
