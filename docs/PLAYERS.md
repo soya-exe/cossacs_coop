@@ -119,8 +119,10 @@ when you are ready to play the network game»). Щелчок по крестик
 
 ## Известные ограничения
 
-- Мод пока **не проверен в настоящем Steam между двумя аккаунтами**. Проверено: две копии игры на
-  одном ПК с имитацией Steam (в том числе с задержкой и потерей пакетов).
+- Проверено в настоящем Steam между двумя аккаунтами (2026-10-28, хост на Linux/Proton: лобби,
+  приглашение, комната, два матча Deathmatch). Кроме того, две копии игры на одном ПК с имитацией
+  Steam, в том числе с задержкой и потерей пакетов. Матчи дольше нескольких минут и игры втроём и
+  больше пока не проверялись.
 - Ник — `Player<номер>`, если не задан `BTWSTEAM_NICK`.
 - Проверен только режим Deathmatch. Historical battle ведёт на тот же экран подключения, но с модом
   не проверялся.
@@ -251,8 +253,10 @@ when you are ready to play the network game»). Клацання по хрест
 
 ## Відомі обмеження
 
-- Мод поки **не перевірено в справжньому Steam між двома обліковими записами**. Перевірено: дві
-  копії гри на одному ПК з імітацією Steam (зокрема із затримкою та втратою пакетів).
+- Перевірено в справжньому Steam між двома обліковими записами (2026-10-28, хост на Linux/Proton:
+  лобі, запрошення, кімната, два матчі Deathmatch). Крім того, дві копії гри на одному ПК з
+  імітацією Steam, зокрема із затримкою та втратою пакетів. Матчі довші за кілька хвилин та ігри
+  втрьох і більше поки не перевірялися.
 - Нік — `Player<номер>`, якщо не задано `BTWSTEAM_NICK`.
 - Перевірено лише режим Deathmatch. Historical battle веде на той самий екран підключення, але з
   модом не перевірявся.
@@ -380,8 +384,10 @@ or `bash install.sh --status`.
 
 ## Known limitations
 
-- **Not yet tested on real Steam between two accounts.** Tested: two copies of the game on one PC
-  with a simulated Steam (also with lag and packet loss).
+- Tested on real Steam between two accounts (2026-10-28, host on Linux/Proton: lobby, invite,
+  room, two Deathmatch games), and with two copies of the game on one PC with a simulated Steam
+  (also with lag and packet loss). Games longer than a few minutes and three or more players are
+  not tested yet.
 - The name is `Player<number>` unless `BTWSTEAM_NICK` is set.
 - Only Deathmatch was tested. Historical battle leads to the same connection screen but has not been
   tested with the mod.

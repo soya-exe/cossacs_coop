@@ -5,9 +5,9 @@ lobby and invites through Steam, game traffic through Valve's relay, no port for
 IP addresses. The game's own lockstep netcode is unchanged; the mod replaces its dead internet
 lobby with a Steam lobby and carries its UDP packets over Steam.
 
-Status: works between two game copies on one PC (mock Steam, also with lag and loss); not yet
-tested on real Steam between two accounts. Players: see [docs/PLAYERS.md](docs/PLAYERS.md)
-(install, how to play, uninstall).
+Status: tested on real Steam between two accounts (2026-10-28: lobby, invite, room, two
+Deathmatch games over the Steam relay), and with two game copies on one PC over a mock Steam
+(also with lag and loss). Player guide and installers: [docs/PLAYERS.md](docs/PLAYERS.md).
 
 ## How it works
 

@@ -131,3 +131,24 @@ The DLL was rebuilt and reinstalled, and the pair was run with no lag.
   - The joiner must already be in the lobby (`BTWSTEAM_JOIN`, an invite, or Join game) before it
     clicks GSC-Game.Net. Otherwise it owns its own lobby and creates a room (as documented).
   - The test copies a and b keep the hook and mock installed (`tools/test_install.sh a b --restore` reverts them).
+
+## Real Steam, two accounts (2026-10-28)
+
+Host: the owner, Arch Linux + Proton, btwsteam 0.1.0 installed with installer/install.sh, real
+`steam_api.dll` (Steamworks.NET 2025.164.1). Joiner: a friend's Steam account on another PC.
+Result reported by the owner: both players entered the room and played. Host log
+(`bin/btwsteam.log`) shows:
+
+- `LOBBY CREATED` (friends-only, 7), host slot 1 = 10.77.0.1; the friend entered the lobby
+  (callback 506 0x1), got slot 2 = 10.77.0.2.
+- `message sender identity found at offset 12`: the 32-bit SteamNetworkingMessage_t layout
+  confirmed on real Steam.
+- Game 1: StartGSCGame 02:01:42, game traffic until ~02:01:58, LeaveGSCRoom 02:02:03.
+- Game 2: StartGSCGame 02:03:47, ran until the friend left the lobby at 02:05:23:
+  ~1150 datagrams each way, all drop counters 0 (no `steamerr`, `qfull`, `unknown`).
+- After the friend left, the host's sends to 10.77.0.2 are counted as `noslot` (expected) and the
+  game closed its socket at 02:05:39.
+- Friend left and re-entered the lobby twice between the games (02:02:13 left, 02:02:41
+  entered, 02:02:45 left, 02:03:14 entered); cause unknown without the friend's log.
+- Noise: `call result ... (callback 1296 / 2101) failed` lines are Steam's own API calls that the
+  hook's dispatcher tries to fetch; harmless.
